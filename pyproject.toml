@@ -1,0 +1,22 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "petsnowy"
+version = "0.1.0"
+description = "Async Python library for local-network control of PetSnowy Snow+ self-cleaning litterbox via Tuya protocol"
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = [
+    "tinytuya>=1.15",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/petsnowy"]
