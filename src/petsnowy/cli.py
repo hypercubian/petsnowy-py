@@ -1,22 +1,20 @@
-"""CLI for quick PetSnowy commands.
+"""CLI for quick PetSnowy device commands.
 
 Usage:
-    python -m petsnowy status
-    python -m petsnowy clean
-    python -m petsnowy deodorize
-    python -m petsnowy pause
-    python -m petsnowy resume
-    python -m petsnowy empty
-    python -m petsnowy cancel-empty
-    python -m petsnowy reset-filter
-    python -m petsnowy calibrate-weight
-    python -m petsnowy light on|off
-    python -m petsnowy auto-clean on|off
-    python -m petsnowy clean-delay <minutes>
-    python -m petsnowy sleep on|off
-    python -m petsnowy child-lock on|off
-    python -m petsnowy auto-deodorize on|off
-    python -m petsnowy monitor
+    python -m petsnowy status                           Litterbox status (default)
+    python -m petsnowy clean                            Litterbox clean cycle
+    python -m petsnowy monitor                          Litterbox event stream
+
+    python -m petsnowy --device fountain status          Fountain status
+    python -m petsnowy --device fountain set-work-mode night
+    python -m petsnowy --device fountain reset-filter
+
+    python -m petsnowy --device purifier status          Purifier status
+    python -m petsnowy --device purifier set-mode auto
+    python -m petsnowy --device purifier set-speed 3
+
+    python -m petsnowy --device feeder status             Feeder status
+    python -m petsnowy --device feeder feed 5
 
 Credentials are read from devices.json (tinytuya wizard output) or env vars:
     PETSNOWY_DEVICE_ID, PETSNOWY_ADDRESS, PETSNOWY_LOCAL_KEY
@@ -29,20 +27,73 @@ import json
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
+from .base import BasePetDevice
 from .const import DPS, Fault, Notification
 from .device import PetSnowy
+from .feeder import Feeder
+from .fountain import Fountain
+from .purifier import Purifier, PurifierFault
+
+# -- Device registry -----------------------------------------------------------
+
+DEVICE_REGISTRY: dict[str, dict[str, Any]] = {
+    "litterbox": {
+        "class": PetSnowy,
+        "product_ids": {"bdfimkssp9ews36b"},
+        "categories": {"msp"},
+        "default_version": 3.4,
+    },
+    "fountain": {
+        "class": Fountain,
+        "product_ids": {"6atwtbtrc6xszdem"},
+        "categories": {"cwysj"},
+        "default_version": 3.3,
+    },
+    "purifier": {
+        "class": Purifier,
+        "product_ids": {"tlqmw4ej2ym37kcv"},
+        "categories": {"kj"},
+        "default_version": 3.4,
+    },
+    "feeder": {
+        "class": Feeder,
+        "product_ids": {"xamrfcvbiz64but3"},
+        "categories": {"cwwsq"},
+        "default_version": 3.3,
+    },
+}
 
 
-def _find_credentials() -> tuple[str, str, str, float]:
-    """Resolve device credentials from env vars or devices.json."""
+def _device_type_from_json(dev_entry: dict[str, Any]) -> str | None:
+    """Match a devices.json entry to a device type name."""
+    pid = dev_entry.get("product_id", "")
+    cat = dev_entry.get("category", "")
+    for name, info in DEVICE_REGISTRY.items():
+        if pid in info["product_ids"] or cat in info["categories"]:
+            return name
+    return None
+
+
+# -- Credential resolution -----------------------------------------------------
+
+def _find_credentials(
+    device_type: str = "litterbox",
+) -> tuple[str, str, str, float, str]:
+    """Resolve device credentials, returning (id, address, key, version, type).
+
+    Checks env vars first, then searches devices.json.
+    """
     device_id = os.environ.get("PETSNOWY_DEVICE_ID")
     address = os.environ.get("PETSNOWY_ADDRESS")
     local_key = os.environ.get("PETSNOWY_LOCAL_KEY")
-    version = float(os.environ.get("PETSNOWY_VERSION", "3.4"))
+    version = float(os.environ.get("PETSNOWY_VERSION", "0"))
 
     if device_id and address and local_key:
-        return device_id, address, local_key, version
+        if version == 0:
+            version = DEVICE_REGISTRY[device_type]["default_version"]
+        return device_id, address, local_key, version, device_type
 
     # Search for devices.json
     candidates = [
@@ -50,29 +101,31 @@ def _find_credentials() -> tuple[str, str, str, float]:
         Path(__file__).resolve().parent.parent.parent / "devices.json",
     ]
     for path in candidates:
-        if path.exists():
-            with open(path) as f:
-                devices = json.load(f)
-            for dev in devices:
-                if dev.get("product_id") == "bdfimkssp9ews36b" or dev.get("category") == "msp":
-                    name = dev.get("name", "").lower()
-                    if "litter" in name or "clean" in name or dev.get("product_id") == "bdfimkssp9ews36b":
-                        return (
-                            dev["id"],
-                            dev.get("ip", ""),
-                            dev["key"],
-                            float(dev.get("version", "3.4")),
-                        )
+        if not path.exists():
+            continue
+        with open(path) as f:
+            devices = json.load(f)
+        for dev in devices:
+            matched_type = _device_type_from_json(dev)
+            if matched_type == device_type:
+                return (
+                    dev["id"],
+                    dev.get("ip", ""),
+                    dev["key"],
+                    float(dev.get("version", DEVICE_REGISTRY[device_type]["default_version"])),
+                    device_type,
+                )
 
-    print("Error: No credentials found.", file=sys.stderr)
+    print(f"Error: No {device_type} credentials found.", file=sys.stderr)
     print("Set PETSNOWY_DEVICE_ID, PETSNOWY_ADDRESS, PETSNOWY_LOCAL_KEY env vars", file=sys.stderr)
     print("or run 'python -m tinytuya wizard' to generate devices.json", file=sys.stderr)
     sys.exit(1)
 
 
-def _connect() -> PetSnowy:
-    device_id, address, local_key, version = _find_credentials()
-    return PetSnowy(device_id, address, local_key, version=version)
+def _connect(device_type: str = "litterbox") -> BasePetDevice:
+    device_id, address, local_key, version, dtype = _find_credentials(device_type)
+    cls = DEVICE_REGISTRY[dtype]["class"]
+    return cls(device_id, address, local_key, version=version)
 
 
 def _parse_bool(value: str) -> bool:
@@ -84,8 +137,11 @@ def _parse_bool(value: str) -> bool:
     sys.exit(1)
 
 
-async def cmd_status() -> None:
-    async with _connect() as dev:
+# -- Litterbox commands --------------------------------------------------------
+
+async def cmd_litterbox_status(device_type: str) -> None:
+    async with _connect(device_type) as dev:
+        assert isinstance(dev, PetSnowy)
         state = await dev.get_state()
         print("=== PetSnowy Snow+ Status ===")
         print()
@@ -116,22 +172,19 @@ async def cmd_status() -> None:
             print(f"\n  Faults:             None")
 
 
-async def cmd_button(name: str, method: str) -> None:
-    async with _connect() as dev:
+async def cmd_button(device_type: str, name: str, method: str) -> None:
+    async with _connect(device_type) as dev:
         await getattr(dev, method)()
         print(f"{name} triggered.")
-        await asyncio.sleep(1)
-        state = await dev.get_state()
-        print(f"Status: {state.status.value}")
 
 
-async def cmd_setting(name: str, method: str, value: object) -> None:
-    async with _connect() as dev:
+async def cmd_setting(device_type: str, name: str, method: str, value: object) -> None:
+    async with _connect(device_type) as dev:
         await getattr(dev, method)(value)
         print(f"{name} set to {value}.")
 
 
-async def cmd_monitor() -> None:
+async def cmd_monitor(device_type: str) -> None:
     DPS_NAMES = {
         str(DPS.SWITCH): "switch",
         str(DPS.AUTO_CLEAN): "auto_clean",
@@ -154,9 +207,8 @@ async def cmd_monitor() -> None:
         str(DPS.CONTINUE): "resume",
     }
 
-    async with _connect() as dev:
-        state = await dev.get_state()
-        print(f"Connected. Status: {state.status.value}")
+    async with _connect(device_type) as dev:
+        print(f"Connected to {device_type}.")
         print("Monitoring for events (Ctrl+C to stop)...\n")
 
         count = 0
@@ -178,59 +230,220 @@ async def cmd_monitor() -> None:
             print()
 
 
-COMMANDS = {
-    "status": lambda args: cmd_status(),
-    "clean": lambda args: cmd_button("Clean cycle", "clean"),
-    "deodorize": lambda args: cmd_button("Deodorization", "deodorize"),
-    "pause": lambda args: cmd_button("Pause", "pause"),
-    "resume": lambda args: cmd_button("Resume", "resume"),
-    "empty": lambda args: cmd_button("Empty litter", "empty_litter"),
-    "cancel-empty": lambda args: cmd_button("Cancel empty", "cancel_empty"),
-    "reset-filter": lambda args: cmd_button("Filter reset", "reset_filter"),
-    "calibrate-weight": lambda args: cmd_button("Weight calibration", "calibrate_weight"),
-    "light": lambda args: cmd_setting("Light", "set_light", _parse_bool(args[0])),
-    "auto-clean": lambda args: cmd_setting("Auto-clean", "set_auto_clean", _parse_bool(args[0])),
-    "clean-delay": lambda args: cmd_setting("Clean delay", "set_clean_delay", int(args[0])),
-    "sleep": lambda args: cmd_setting("Sleep mode", "set_sleep_mode", _parse_bool(args[0])),
-    "child-lock": lambda args: cmd_setting("Child lock", "set_child_lock", _parse_bool(args[0])),
-    "auto-deodorize": lambda args: cmd_setting("Auto-deodorize", "set_auto_deodorize", _parse_bool(args[0])),
-    "monitor": lambda args: cmd_monitor(),
+# -- Fountain commands ---------------------------------------------------------
+
+async def cmd_fountain_status(device_type: str) -> None:
+    async with _connect(device_type) as dev:
+        assert isinstance(dev, Fountain)
+        state = await dev.get_state()
+        print("=== PetSnowy Water Fountain Status ===")
+        print()
+        print(f"  Power:              {'ON' if state.switch else 'OFF'}")
+        print(f"  Work mode:          {state.work_mode.value}")
+        print(f"  Filter remaining:   {state.filter_days} days")
+        print(f"  Pump clean in:      {state.pump_time} days")
+        print(f"  Filter reminder:    {state.filter_life} days")
+
+
+# -- Purifier commands ---------------------------------------------------------
+
+async def cmd_purifier_status(device_type: str) -> None:
+    async with _connect(device_type) as dev:
+        assert isinstance(dev, Purifier)
+        state = await dev.get_state()
+        print("=== PetSnowy Air Purifier Status ===")
+        print()
+        print(f"  Power:              {'ON' if state.switch else 'OFF'}")
+        print(f"  Mode:               {state.mode.value}")
+        print(f"  Fan speed:          {state.speed}")
+        print(f"  Ionizer:            {'ON' if state.anion else 'OFF'}")
+        print(f"  TVOC:               {state.tvoc} ug/m3")
+        print(f"  Filter remaining:   {state.filter_days} days")
+        print(f"  Countdown:          {state.countdown_set}")
+        print(f"  Countdown left:     {state.countdown_left} min")
+
+        if state.faults:
+            print(f"\n  FAULTS:")
+            for flag in PurifierFault:
+                if flag and flag in state.faults:
+                    print(f"    - {flag.name}")
+        else:
+            print(f"\n  Faults:             None")
+
+
+# -- Feeder commands -----------------------------------------------------------
+
+async def cmd_feeder_status(device_type: str) -> None:
+    async with _connect(device_type) as dev:
+        assert isinstance(dev, Feeder)
+        state = await dev.get_state()
+        print("=== PetSnowy Pet Feeder Status ===")
+        print()
+        print(f"  Food level:         {state.food_status.value}")
+
+
+# -- Command dispatch ----------------------------------------------------------
+
+async def _cmd_power(device_type: str, name: str, method: str) -> None:
+    """Power on/off helper for devices with turn_on/turn_off (no args)."""
+    async with _connect(device_type) as dev:
+        await getattr(dev, method)()
+        print(f"{name}.")
+
+
+def _build_litterbox_commands() -> dict[str, Any]:
+    return {
+        "status": lambda args, dt: cmd_litterbox_status(dt),
+        "clean": lambda args, dt: cmd_button(dt, "Clean cycle", "clean"),
+        "deodorize": lambda args, dt: cmd_button(dt, "Deodorization", "deodorize"),
+        "pause": lambda args, dt: cmd_button(dt, "Pause", "pause"),
+        "resume": lambda args, dt: cmd_button(dt, "Resume", "resume"),
+        "empty": lambda args, dt: cmd_button(dt, "Empty litter", "empty_litter"),
+        "cancel-empty": lambda args, dt: cmd_button(dt, "Cancel empty", "cancel_empty"),
+        "reset-filter": lambda args, dt: cmd_button(dt, "Filter reset", "reset_filter"),
+        "calibrate-weight": lambda args, dt: cmd_button(dt, "Weight calibration", "calibrate_weight"),
+        "light": lambda args, dt: cmd_setting(dt, "Light", "set_light", _parse_bool(args[0])),
+        "auto-clean": lambda args, dt: cmd_setting(dt, "Auto-clean", "set_auto_clean", _parse_bool(args[0])),
+        "clean-delay": lambda args, dt: cmd_setting(dt, "Clean delay", "set_clean_delay", int(args[0])),
+        "sleep": lambda args, dt: cmd_setting(dt, "Sleep mode", "set_sleep_mode", _parse_bool(args[0])),
+        "child-lock": lambda args, dt: cmd_setting(dt, "Child lock", "set_child_lock", _parse_bool(args[0])),
+        "auto-deodorize": lambda args, dt: cmd_setting(dt, "Auto-deodorize", "set_auto_deodorize", _parse_bool(args[0])),
+        "monitor": lambda args, dt: cmd_monitor(dt),
+    }
+
+
+def _build_fountain_commands() -> dict[str, Any]:
+    return {
+        "status": lambda args, dt: cmd_fountain_status(dt),
+        "on": lambda args, dt: _cmd_power(dt, "Powered on", "turn_on"),
+        "off": lambda args, dt: _cmd_power(dt, "Powered off", "turn_off"),
+        "set-work-mode": lambda args, dt: cmd_setting(dt, "Work mode", "set_work_mode", args[0]),
+        "reset-filter": lambda args, dt: cmd_button(dt, "Filter reset", "reset_filter"),
+        "reset-pump": lambda args, dt: cmd_button(dt, "Pump reset", "reset_pump"),
+        "set-filter-reminder": lambda args, dt: cmd_setting(dt, "Filter reminder", "set_filter_reminder", int(args[0])),
+        "monitor": lambda args, dt: cmd_monitor(dt),
+    }
+
+
+def _build_purifier_commands() -> dict[str, Any]:
+    return {
+        "status": lambda args, dt: cmd_purifier_status(dt),
+        "on": lambda args, dt: _cmd_power(dt, "Powered on", "turn_on"),
+        "off": lambda args, dt: _cmd_power(dt, "Powered off", "turn_off"),
+        "set-mode": lambda args, dt: cmd_setting(dt, "Mode", "set_mode", args[0]),
+        "set-speed": lambda args, dt: cmd_setting(dt, "Fan speed", "set_speed", args[0]),
+        "anion": lambda args, dt: cmd_setting(dt, "Ionizer", "set_anion", _parse_bool(args[0])),
+        "set-countdown": lambda args, dt: cmd_setting(dt, "Countdown", "set_countdown", args[0]),
+        "monitor": lambda args, dt: cmd_monitor(dt),
+    }
+
+
+def _build_feeder_commands() -> dict[str, Any]:
+    return {
+        "status": lambda args, dt: cmd_feeder_status(dt),
+        "feed": lambda args, dt: cmd_setting(dt, "Feed", "feed", int(args[0])),
+        "quick-feed": lambda args, dt: cmd_button(dt, "Quick feed", "quick_feed"),
+        "monitor": lambda args, dt: cmd_monitor(dt),
+    }
+
+
+DEVICE_COMMANDS: dict[str, dict[str, Any]] = {
+    "litterbox": _build_litterbox_commands(),
+    "fountain": _build_fountain_commands(),
+    "purifier": _build_purifier_commands(),
+    "feeder": _build_feeder_commands(),
 }
 
 
+# -- Help text -----------------------------------------------------------------
+
+HELP_TEXTS: dict[str, str] = {
+    "litterbox": """\
+Litterbox commands:
+  status                  Show device state
+  clean                   Start manual clean cycle
+  deodorize               Start deodorization
+  pause                   Pause current operation
+  resume                  Resume paused operation
+  empty                   Start emptying litter
+  cancel-empty            Cancel litter emptying
+  reset-filter            Reset filter life counter
+  calibrate-weight        Calibrate weight sensor
+  light on|off            Toggle indicator light
+  auto-clean on|off       Toggle automatic cleaning
+  clean-delay <minutes>   Set auto-clean delay (2-60, even)
+  sleep on|off            Toggle sleep mode
+  child-lock on|off       Toggle child/pet lock
+  auto-deodorize on|off   Toggle auto deodorization
+  monitor                 Stream live events""",
+    "fountain": """\
+Fountain commands:
+  status                        Show fountain state
+  on / off                      Power on/off
+  set-work-mode normal|night    Set operating mode
+  reset-filter                  Reset filter counter
+  reset-pump                    Reset pump counter
+  set-filter-reminder <days>    Set filter reminder (0-90)
+  monitor                       Stream live events""",
+    "purifier": """\
+Purifier commands:
+  status                                Show purifier state
+  on / off                              Power on/off
+  set-mode auto|sleep                   Set operating mode
+  set-speed 1-6                         Set fan speed
+  anion on|off                          Toggle ionizer
+  set-countdown cancel|1h|2h|3h|4h|5h   Set auto-off timer
+  monitor                               Stream live events""",
+    "feeder": """\
+Feeder commands:
+  status              Show feeder state
+  feed <portions>     Dispense food (1-20 cups)
+  quick-feed          Dispense 1 portion
+  monitor             Stream live events""",
+}
+
+
+def _print_help(device_type: str | None = None) -> None:
+    print("Usage: python -m petsnowy [--device <type>] <command> [args]")
+    print()
+    print("Device types: litterbox (default), fountain, purifier, feeder")
+    print()
+    if device_type and device_type in HELP_TEXTS:
+        print(HELP_TEXTS[device_type])
+    else:
+        for dt, text in HELP_TEXTS.items():
+            print(text)
+            print()
+
+
 def main() -> None:
-    if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help", "help"):
-        print("Usage: python -m petsnowy <command> [args]")
-        print()
-        print("Commands:")
-        print("  status                  Show device state")
-        print("  clean                   Start manual clean cycle")
-        print("  deodorize               Start deodorization")
-        print("  pause                   Pause current operation")
-        print("  resume                  Resume paused operation")
-        print("  empty                   Start emptying litter")
-        print("  cancel-empty            Cancel litter emptying")
-        print("  reset-filter            Reset filter life counter")
-        print("  calibrate-weight        Calibrate weight sensor")
-        print("  light on|off            Toggle indicator light")
-        print("  auto-clean on|off       Toggle automatic cleaning")
-        print("  clean-delay <minutes>   Set auto-clean delay (2-60, even)")
-        print("  sleep on|off            Toggle sleep mode")
-        print("  child-lock on|off       Toggle child/pet lock")
-        print("  auto-deodorize on|off   Toggle auto deodorization")
-        print("  monitor                 Stream live events")
+    argv = sys.argv[1:]
+
+    # Parse --device flag
+    device_type = "litterbox"
+    if len(argv) >= 2 and argv[0] == "--device":
+        device_type = argv[1].lower()
+        argv = argv[2:]
+        if device_type not in DEVICE_COMMANDS:
+            print(f"Unknown device type: {device_type}", file=sys.stderr)
+            print(f"Valid types: {', '.join(DEVICE_COMMANDS)}", file=sys.stderr)
+            sys.exit(1)
+
+    if not argv or argv[0] in ("-h", "--help", "help"):
+        _print_help(device_type)
         return
 
-    cmd = sys.argv[1]
-    args = sys.argv[2:]
+    cmd = argv[0]
+    args = argv[1:]
+    commands = DEVICE_COMMANDS[device_type]
 
-    if cmd not in COMMANDS:
-        print(f"Unknown command: {cmd}", file=sys.stderr)
-        print(f"Run 'python -m petsnowy help' for usage", file=sys.stderr)
+    if cmd not in commands:
+        print(f"Unknown {device_type} command: {cmd}", file=sys.stderr)
+        print(f"Run 'python -m petsnowy --device {device_type} help' for usage", file=sys.stderr)
         sys.exit(1)
 
     try:
-        asyncio.run(COMMANDS[cmd](args))
+        asyncio.run(commands[cmd](args, device_type))
     except KeyboardInterrupt:
         print("\nStopped.")
     except Exception as e:
