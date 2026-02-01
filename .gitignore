@@ -6,3 +6,7 @@ build/
 .eggs/
 *.egg
 .env
+devices.json
+snapshot.json
+tinytuya.json
+tuya-raw.json
