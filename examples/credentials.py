@@ -1,16 +1,16 @@
 """Guide and helper for extracting Tuya device credentials.
 
-Run this script for step-by-step instructions on how to obtain the
-device_id, local_key, and IP address needed to control your PetSnowy.
+Run this script for step-by-step instructions on how to obtain the device_id, local_key,
+and IP address needed to control your PetSnowy.
 """
 
 import json
-import sys
 from pathlib import Path
 
 
 def print_guide() -> None:
-    print("""
+    print(
+        """
 === PetSnowy Tuya Credential Setup ===
 
 You need three values to control your PetSnowy locally:
@@ -73,7 +73,8 @@ You need three values to control your PetSnowy locally:
     ) as dev:
         state = await dev.get_state()
         print(state)
-""")
+"""
+    )
 
 
 def check_devices_json() -> None:
@@ -99,7 +100,10 @@ def check_devices_json() -> None:
                     print(f"  Version:   {dev.get('version', '3.4')}")
                     return
             print("  No PetSnowy device found in devices.json.")
-            print("  Make sure your PetSnowy app account is linked in the Tuya IoT Platform.")
+            print(
+                "  Make sure your PetSnowy app account is linked"
+                " in the Tuya IoT Platform."
+            )
             return
     print("\nNo devices.json found. Follow the guide above to generate one.")
 

@@ -27,7 +27,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from .base import BasePetDevice
 from .const import DPS, Fault, Notification
@@ -78,6 +78,7 @@ def _device_type_from_json(dev_entry: dict[str, Any]) -> str | None:
 
 # -- Credential resolution -----------------------------------------------------
 
+
 def _find_credentials(
     device_type: str = "litterbox",
 ) -> tuple[str, str, str, float, str]:
@@ -112,13 +113,22 @@ def _find_credentials(
                     dev["id"],
                     dev.get("ip", ""),
                     dev["key"],
-                    float(dev.get("version", DEVICE_REGISTRY[device_type]["default_version"])),
+                    float(
+                        dev.get(
+                            "version", DEVICE_REGISTRY[device_type]["default_version"]
+                        )
+                    ),
                     device_type,
                 )
 
     print(f"Error: No {device_type} credentials found.", file=sys.stderr)
-    print("Set PETSNOWY_DEVICE_ID, PETSNOWY_ADDRESS, PETSNOWY_LOCAL_KEY env vars", file=sys.stderr)
-    print("or run 'python -m tinytuya wizard' to generate devices.json", file=sys.stderr)
+    print(
+        "Set PETSNOWY_DEVICE_ID, PETSNOWY_ADDRESS, PETSNOWY_LOCAL_KEY env vars",
+        file=sys.stderr,
+    )
+    print(
+        "or run 'python -m tinytuya wizard' to generate devices.json", file=sys.stderr
+    )
     sys.exit(1)
 
 
@@ -139,9 +149,10 @@ def _parse_bool(value: str) -> bool:
 
 # -- Litterbox commands --------------------------------------------------------
 
+
 async def cmd_litterbox_status(device_type: str) -> None:
     async with _connect(device_type) as dev:
-        assert isinstance(dev, PetSnowy)
+        dev = cast(PetSnowy, dev)
         state = await dev.get_state()
         print("=== PetSnowy Snow+ Status ===")
         print()
@@ -158,18 +169,18 @@ async def cmd_litterbox_status(device_type: str) -> None:
         print(f"  Filter remaining:   {state.filter_days_remaining} days")
 
         if state.notifications:
-            print(f"\n  Notifications:")
-            for flag in Notification:
-                if flag and flag in state.notifications:
-                    print(f"    - {flag.name}")
+            print("\n  Notifications:")
+            for notif in Notification:
+                if notif and notif in state.notifications:
+                    print(f"    - {notif.name}")
 
         if state.faults:
-            print(f"\n  FAULTS:")
-            for flag in Fault:
-                if flag and flag in state.faults:
-                    print(f"    - {flag.name}")
+            print("\n  FAULTS:")
+            for fault in Fault:
+                if fault and fault in state.faults:
+                    print(f"    - {fault.name}")
         else:
-            print(f"\n  Faults:             None")
+            print("\n  Faults:             None")
 
 
 async def cmd_button(device_type: str, name: str, method: str) -> None:
@@ -218,12 +229,12 @@ async def cmd_monitor(device_type: str) -> None:
             for key, value in update.items():
                 name = DPS_NAMES.get(key, f"dps_{key}")
                 if key == str(DPS.NOTIFICATION) and isinstance(value, int):
-                    flags = Notification(value)
-                    active = [f.name for f in Notification if f and f in flags]
+                    notif_flags = Notification(value)
+                    active = [n.name for n in Notification if n and n in notif_flags]
                     print(f"  {name}: {active or 'none'}")
                 elif key == str(DPS.FAULT) and isinstance(value, int):
-                    flags = Fault(value)
-                    active = [f.name for f in Fault if f and f in flags]
+                    fault_flags = Fault(value)
+                    active = [ft.name for ft in Fault if ft and ft in fault_flags]
                     print(f"  {name}: {active or 'none'}")
                 else:
                     print(f"  {name}: {value}")
@@ -232,9 +243,10 @@ async def cmd_monitor(device_type: str) -> None:
 
 # -- Fountain commands ---------------------------------------------------------
 
+
 async def cmd_fountain_status(device_type: str) -> None:
     async with _connect(device_type) as dev:
-        assert isinstance(dev, Fountain)
+        dev = cast(Fountain, dev)
         state = await dev.get_state()
         print("=== PetSnowy Water Fountain Status ===")
         print()
@@ -247,9 +259,10 @@ async def cmd_fountain_status(device_type: str) -> None:
 
 # -- Purifier commands ---------------------------------------------------------
 
+
 async def cmd_purifier_status(device_type: str) -> None:
     async with _connect(device_type) as dev:
-        assert isinstance(dev, Purifier)
+        dev = cast(Purifier, dev)
         state = await dev.get_state()
         print("=== PetSnowy Air Purifier Status ===")
         print()
@@ -263,19 +276,20 @@ async def cmd_purifier_status(device_type: str) -> None:
         print(f"  Countdown left:     {state.countdown_left} min")
 
         if state.faults:
-            print(f"\n  FAULTS:")
+            print("\n  FAULTS:")
             for flag in PurifierFault:
                 if flag and flag in state.faults:
                     print(f"    - {flag.name}")
         else:
-            print(f"\n  Faults:             None")
+            print("\n  Faults:             None")
 
 
 # -- Feeder commands -----------------------------------------------------------
 
+
 async def cmd_feeder_status(device_type: str) -> None:
     async with _connect(device_type) as dev:
-        assert isinstance(dev, Feeder)
+        dev = cast(Feeder, dev)
         state = await dev.get_state()
         print("=== PetSnowy Pet Feeder Status ===")
         print()
@@ -283,6 +297,7 @@ async def cmd_feeder_status(device_type: str) -> None:
 
 
 # -- Command dispatch ----------------------------------------------------------
+
 
 async def _cmd_power(device_type: str, name: str, method: str) -> None:
     """Power on/off helper for devices with turn_on/turn_off (no args)."""
@@ -301,13 +316,27 @@ def _build_litterbox_commands() -> dict[str, Any]:
         "empty": lambda args, dt: cmd_button(dt, "Empty litter", "empty_litter"),
         "cancel-empty": lambda args, dt: cmd_button(dt, "Cancel empty", "cancel_empty"),
         "reset-filter": lambda args, dt: cmd_button(dt, "Filter reset", "reset_filter"),
-        "calibrate-weight": lambda args, dt: cmd_button(dt, "Weight calibration", "calibrate_weight"),
-        "light": lambda args, dt: cmd_setting(dt, "Light", "set_light", _parse_bool(args[0])),
-        "auto-clean": lambda args, dt: cmd_setting(dt, "Auto-clean", "set_auto_clean", _parse_bool(args[0])),
-        "clean-delay": lambda args, dt: cmd_setting(dt, "Clean delay", "set_clean_delay", int(args[0])),
-        "sleep": lambda args, dt: cmd_setting(dt, "Sleep mode", "set_sleep_mode", _parse_bool(args[0])),
-        "child-lock": lambda args, dt: cmd_setting(dt, "Child lock", "set_child_lock", _parse_bool(args[0])),
-        "auto-deodorize": lambda args, dt: cmd_setting(dt, "Auto-deodorize", "set_auto_deodorize", _parse_bool(args[0])),
+        "calibrate-weight": lambda args, dt: cmd_button(
+            dt, "Weight calibration", "calibrate_weight"
+        ),
+        "light": lambda args, dt: cmd_setting(
+            dt, "Light", "set_light", _parse_bool(args[0])
+        ),
+        "auto-clean": lambda args, dt: cmd_setting(
+            dt, "Auto-clean", "set_auto_clean", _parse_bool(args[0])
+        ),
+        "clean-delay": lambda args, dt: cmd_setting(
+            dt, "Clean delay", "set_clean_delay", int(args[0])
+        ),
+        "sleep": lambda args, dt: cmd_setting(
+            dt, "Sleep mode", "set_sleep_mode", _parse_bool(args[0])
+        ),
+        "child-lock": lambda args, dt: cmd_setting(
+            dt, "Child lock", "set_child_lock", _parse_bool(args[0])
+        ),
+        "auto-deodorize": lambda args, dt: cmd_setting(
+            dt, "Auto-deodorize", "set_auto_deodorize", _parse_bool(args[0])
+        ),
         "monitor": lambda args, dt: cmd_monitor(dt),
     }
 
@@ -317,10 +346,14 @@ def _build_fountain_commands() -> dict[str, Any]:
         "status": lambda args, dt: cmd_fountain_status(dt),
         "on": lambda args, dt: _cmd_power(dt, "Powered on", "turn_on"),
         "off": lambda args, dt: _cmd_power(dt, "Powered off", "turn_off"),
-        "set-work-mode": lambda args, dt: cmd_setting(dt, "Work mode", "set_work_mode", args[0]),
+        "set-work-mode": lambda args, dt: cmd_setting(
+            dt, "Work mode", "set_work_mode", args[0]
+        ),
         "reset-filter": lambda args, dt: cmd_button(dt, "Filter reset", "reset_filter"),
         "reset-pump": lambda args, dt: cmd_button(dt, "Pump reset", "reset_pump"),
-        "set-filter-reminder": lambda args, dt: cmd_setting(dt, "Filter reminder", "set_filter_reminder", int(args[0])),
+        "set-filter-reminder": lambda args, dt: cmd_setting(
+            dt, "Filter reminder", "set_filter_reminder", int(args[0])
+        ),
         "monitor": lambda args, dt: cmd_monitor(dt),
     }
 
@@ -331,9 +364,15 @@ def _build_purifier_commands() -> dict[str, Any]:
         "on": lambda args, dt: _cmd_power(dt, "Powered on", "turn_on"),
         "off": lambda args, dt: _cmd_power(dt, "Powered off", "turn_off"),
         "set-mode": lambda args, dt: cmd_setting(dt, "Mode", "set_mode", args[0]),
-        "set-speed": lambda args, dt: cmd_setting(dt, "Fan speed", "set_speed", args[0]),
-        "anion": lambda args, dt: cmd_setting(dt, "Ionizer", "set_anion", _parse_bool(args[0])),
-        "set-countdown": lambda args, dt: cmd_setting(dt, "Countdown", "set_countdown", args[0]),
+        "set-speed": lambda args, dt: cmd_setting(
+            dt, "Fan speed", "set_speed", args[0]
+        ),
+        "anion": lambda args, dt: cmd_setting(
+            dt, "Ionizer", "set_anion", _parse_bool(args[0])
+        ),
+        "set-countdown": lambda args, dt: cmd_setting(
+            dt, "Countdown", "set_countdown", args[0]
+        ),
         "monitor": lambda args, dt: cmd_monitor(dt),
     }
 
@@ -411,7 +450,7 @@ def _print_help(device_type: str | None = None) -> None:
     if device_type and device_type in HELP_TEXTS:
         print(HELP_TEXTS[device_type])
     else:
-        for dt, text in HELP_TEXTS.items():
+        for _dt, text in HELP_TEXTS.items():
             print(text)
             print()
 
@@ -439,7 +478,10 @@ def main() -> None:
 
     if cmd not in commands:
         print(f"Unknown {device_type} command: {cmd}", file=sys.stderr)
-        print(f"Run 'python -m petsnowy --device {device_type} help' for usage", file=sys.stderr)
+        print(
+            f"Run 'python -m petsnowy --device {device_type} help' for usage",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     try:

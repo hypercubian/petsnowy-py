@@ -1,4 +1,4 @@
-"""petsnowy — Async Python library for local control of PetSnowy devices."""
+"""Petsnowy — Async Python library for local control of PetSnowy devices."""
 
 from .const import DPS, DeviceStatus, Fault, Notification
 from .device import PetSnowy
@@ -15,13 +15,7 @@ from .feeder import (
 )
 from .fountain import Fountain, FountainDPS, FountainState, WorkMode
 from .models import DeviceState
-from .purifier import (
-    Purifier,
-    PurifierDPS,
-    PurifierFault,
-    PurifierMode,
-    PurifierState,
-)
+from .purifier import Purifier, PurifierDPS, PurifierFault, PurifierMode, PurifierState
 
 __all__ = [
     # Litterbox (original)

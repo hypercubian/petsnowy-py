@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import cast
 
 from ..purifier import Purifier, PurifierFault, PurifierState
 from .common import connect_device
@@ -11,7 +12,7 @@ from .common import connect_device
 async def get_status() -> PurifierState:
     """Connect to the air purifier and return its current state."""
     async with connect_device("purifier") as dev:
-        assert isinstance(dev, Purifier)
+        dev = cast(Purifier, dev)
         return await dev.get_state()
 
 
@@ -29,18 +30,18 @@ def print_status(state: PurifierState) -> None:
     print(f"  Countdown left:     {state.countdown_left} min")
 
     if state.faults:
-        print(f"\n  FAULTS:")
-        for flag in PurifierFault:
-            if flag and flag in state.faults:
-                print(f"    - {flag.name}")
+        print("\n  FAULTS:")
+        for fault in PurifierFault:
+            if fault and fault in state.faults:
+                print(f"    - {fault.name}")
     else:
-        print(f"\n  Faults:             None")
+        print("\n  Faults:             None")
 
 
 async def set_speed(level: str) -> None:
     """Set the purifier fan speed ('1' through '6')."""
     async with connect_device("purifier") as dev:
-        assert isinstance(dev, Purifier)
+        dev = cast(Purifier, dev)
         await dev.set_speed(level)
 
 

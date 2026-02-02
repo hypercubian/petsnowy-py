@@ -6,7 +6,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from petsnowy import PetSnowy, Fault, Notification
+from petsnowy import Fault, Notification, PetSnowy  # noqa: E402
 
 # Replace with your actual credentials
 DEVICE_ID = os.environ.get("PETSNOWY_DEVICE_ID", "your_device_id")
@@ -34,19 +34,19 @@ async def main() -> None:
 
         # Decode notifications
         if state.notifications:
-            print(f"\n  Notifications:")
-            for flag in Notification:
-                if flag and flag in state.notifications:
-                    print(f"    - {flag.name}")
+            print("\n  Notifications:")
+            for notif in Notification:
+                if notif and notif in state.notifications:
+                    print(f"    - {notif.name}")
 
         # Decode faults
         if state.faults:
-            print(f"\n  FAULTS:")
-            for flag in Fault:
-                if flag and flag in state.faults:
-                    print(f"    - {flag.name}")
+            print("\n  FAULTS:")
+            for fault in Fault:
+                if fault and fault in state.faults:
+                    print(f"    - {fault.name}")
         else:
-            print(f"\n  Faults:             None")
+            print("\n  Faults:             None")
 
         print(f"\n  Raw DPS: {state.raw_dps}")
 

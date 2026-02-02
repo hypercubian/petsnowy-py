@@ -18,14 +18,14 @@ class PurifierDPS:
     """
 
     SWITCH = 1
-    MODE = 3                # "auto", "sleep"
-    SPEED = 4               # "1"-"6"
-    ANION = 6               # ionizer on/off
-    TVOC = 14               # 0-1000 ug/m3, read-only
-    FILTER_DAYS = 16        # 0-1000, read-only
-    COUNTDOWN_SET = 18      # "cancel","1h","2h","3h","4h","5h"
-    COUNTDOWN_LEFT = 19     # 0-600 min, read-only
-    FAULT = 22              # bitmap, read-only
+    MODE = 3  # "auto", "sleep"
+    SPEED = 4  # "1"-"6"
+    ANION = 6  # ionizer on/off
+    TVOC = 14  # 0-1000 ug/m3, read-only
+    FILTER_DAYS = 16  # 0-1000, read-only
+    COUNTDOWN_SET = 18  # "cancel","1h","2h","3h","4h","5h"
+    COUNTDOWN_LEFT = 19  # 0-600 min, read-only
+    FAULT = 22  # bitmap, read-only
 
 
 class PurifierMode(StrEnum):
@@ -63,6 +63,7 @@ class PurifierState:
     @classmethod
     def from_dps(cls, dps: dict[str, Any]) -> PurifierState:
         """Build a PurifierState from a raw DPS dict (string keys)."""
+
         def _bool(key: int, default: bool = False) -> bool:
             v = dps.get(str(key))
             return bool(v) if v is not None else default

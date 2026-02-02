@@ -76,10 +76,12 @@ repos:
       - id: pylint-essential
         name: pylint (essential checks)
         entry: pylint
-        language: system
+        language: python
+        additional_dependencies: [pylint]
         types: [python]
         files: ^src/
         args:
           - "-rn"
           - "-sn"
           - "--errors-only"
+          - "--disable=E0401"

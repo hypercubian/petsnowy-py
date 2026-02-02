@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import cast
 
 from ..fountain import Fountain, FountainState
 from .common import connect_device
@@ -11,7 +12,7 @@ from .common import connect_device
 async def get_status() -> FountainState:
     """Connect to the water fountain and return its current state."""
     async with connect_device("fountain") as dev:
-        assert isinstance(dev, Fountain)
+        dev = cast(Fountain, dev)
         return await dev.get_state()
 
 
@@ -30,7 +31,7 @@ def print_status(state: FountainState) -> None:
 async def set_light(enabled: bool) -> None:
     """Turn the fountain indicator light on or off."""
     async with connect_device("fountain") as dev:
-        assert isinstance(dev, Fountain)
+        dev = cast(Fountain, dev)
         await dev.set_light(enabled)
 
 

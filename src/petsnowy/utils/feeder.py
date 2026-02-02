@@ -3,22 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+from typing import cast
 
-from ..feeder import (
-    Feeder,
-    FeederState,
-    MealSchedule,
-    Weekday,
-    decode_meal_plan,
-    encode_meal_plan,
-)
+from ..feeder import Feeder, FeederState, MealSchedule, decode_meal_plan
 from .common import cloud_get_dps, connect_device
 
 
 async def get_status() -> FeederState:
     """Connect to the pet feeder and return its current state."""
     async with connect_device("feeder") as dev:
-        assert isinstance(dev, Feeder)
+        dev = cast(Feeder, dev)
         return await dev.get_state()
 
 
@@ -33,16 +27,15 @@ def print_status(state: FeederState) -> None:
 async def dump_raw_dps() -> dict[str, object]:
     """Connect to the feeder and return the full raw DPS dict for discovery."""
     async with connect_device("feeder") as dev:
-        assert isinstance(dev, Feeder)
+        dev = cast(Feeder, dev)
         return await dev.get_raw_dps()
 
 
 def get_schedule() -> list[MealSchedule]:
     """Read the current feeding schedule from the Tuya cloud.
 
-    The meal_plan (DPS 1) is a raw-type data point that the local
-    protocol doesn't include in status responses. The cloud API
-    returns it as a base64 string.
+    The meal_plan (DPS 1) is a raw-type data point that the local protocol doesn't
+    include in status responses. The cloud API returns it as a base64 string.
 
     Requires tinytuya.json with cloud API credentials.
     """
@@ -64,7 +57,7 @@ async def set_schedule(schedules: list[MealSchedule]) -> None:
         ])
     """
     async with connect_device("feeder") as dev:
-        assert isinstance(dev, Feeder)
+        dev = cast(Feeder, dev)
         await dev.set_meal_plan(schedules)
 
 

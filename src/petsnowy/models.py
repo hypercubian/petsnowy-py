@@ -35,6 +35,7 @@ class DeviceState:
     @classmethod
     def from_dps(cls, dps: dict[str, Any]) -> DeviceState:
         """Build a DeviceState from a raw DPS dict (string keys)."""
+
         def _bool(key: int, default: bool = False) -> bool:
             v = dps.get(str(key))
             return bool(v) if v is not None else default

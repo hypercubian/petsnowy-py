@@ -7,8 +7,8 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from petsnowy import PetSnowy, DeviceState, Notification, Fault
-from petsnowy.const import DPS
+from petsnowy import Fault, Notification, PetSnowy  # noqa: E402
+from petsnowy.const import DPS  # noqa: E402
 
 DEVICE_ID = os.environ.get("PETSNOWY_DEVICE_ID", "your_device_id")
 ADDRESS = os.environ.get("PETSNOWY_ADDRESS", "192.168.1.100")
@@ -38,18 +38,18 @@ DPS_NAMES = {
 }
 
 
-def decode_update(dps: dict) -> None:
+def decode_update(dps: dict[str, object]) -> None:
     """Print a human-readable interpretation of a DPS update."""
     for key, value in dps.items():
         name = DPS_NAMES.get(key, f"dps_{key}")
 
         if key == str(DPS.NOTIFICATION) and isinstance(value, int):
-            flags = Notification(value)
-            active = [f.name for f in Notification if f and f in flags]
+            notif_flags = Notification(value)
+            active = [n.name for n in Notification if n and n in notif_flags]
             print(f"  {name}: {active or 'none'}")
         elif key == str(DPS.FAULT) and isinstance(value, int):
-            flags = Fault(value)
-            active = [f.name for f in Fault if f and f in flags]
+            fault_flags = Fault(value)
+            active = [ft.name for ft in Fault if ft and ft in fault_flags]
             print(f"  {name}: {active or 'none'}")
         else:
             print(f"  {name}: {value}")

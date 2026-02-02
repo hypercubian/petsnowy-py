@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import Any, Self
 
 import tinytuya
 
@@ -17,9 +17,8 @@ logger = logging.getLogger(__name__)
 class BasePetDevice:
     """Base async interface for PetSnowy Tuya devices on the local network.
 
-    Provides connection lifecycle, DPS read/write helpers, and an event
-    monitoring async generator. Subclasses add device-specific commands
-    and state parsing.
+    Provides connection lifecycle, DPS read/write helpers, and an event monitoring async
+    generator. Subclasses add device-specific commands and state parsing.
     """
 
     def __init__(
@@ -63,7 +62,7 @@ class BasePetDevice:
             self._dev = None
             logger.info("Disconnected from %s", type(self).__name__)
 
-    async def __aenter__(self) -> BasePetDevice:
+    async def __aenter__(self) -> Self:
         await self.connect()
         return self
 
@@ -82,7 +81,9 @@ class BasePetDevice:
         dev = self._ensure_connected()
         result = await asyncio.to_thread(dev.set_value, dps_id, value)
         if result and "Error" in result:
-            raise CommandError(f"Failed to set DPS {dps_id}={value!r}: {result['Error']}")
+            raise CommandError(
+                f"Failed to set DPS {dps_id}={value!r}: {result['Error']}"
+            )
 
     async def _send_button(self, dps_id: int) -> None:
         """Send a momentary button press (set True, device auto-resets)."""
@@ -104,8 +105,8 @@ class BasePetDevice:
     async def monitor(self) -> AsyncIterator[dict[str, Any]]:
         """Async generator that yields DPS update dicts as they arrive.
 
-        Maintains a persistent connection with heartbeats. Automatically
-        reconnects on transient errors.
+        Maintains a persistent connection with heartbeats. Automatically reconnects on
+        transient errors.
         """
         dev = self._ensure_connected()
         queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
@@ -146,12 +147,14 @@ class BasePetDevice:
                         )
                     except Exception as exc:
                         logger.error("Monitor: reconnect failed: %s", exc)
-                        raise ConnectionError(f"Monitor reconnect failed: {exc}") from exc
+                        raise ConnectionError(
+                            f"Monitor reconnect failed: {exc}"
+                        ) from exc
                     continue
                 yield item
         finally:
             stop.set()
             try:
                 await asyncio.wait_for(asyncio.wrap_future(task), timeout=2.0)
-            except (asyncio.TimeoutError, Exception):
+            except Exception:
                 pass

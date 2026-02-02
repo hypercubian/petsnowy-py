@@ -18,11 +18,11 @@ class FeederDPS:
     Version: 3.3
     """
 
-    MEAL_PLAN = 1           # raw bytes, scheduled feeding plan
-    MANUAL_FEED = 3         # int 1-20, manual feed portions (cups)
-    STATUS = 6              # "enough", "insufficient"
-    COVER_STATE = 13        # int, lid open/closed
-    FACTORY_RESET = 24      # momentary button
+    MEAL_PLAN = 1  # raw bytes, scheduled feeding plan
+    MANUAL_FEED = 3  # int 1-20, manual feed portions (cups)
+    STATUS = 6  # "enough", "insufficient"
+    COVER_STATE = 13  # int, lid open/closed
+    FACTORY_RESET = 24  # momentary button
 
 
 class FoodStatus(StrEnum):
@@ -33,7 +33,10 @@ class FoodStatus(StrEnum):
 
 
 class Weekday(IntFlag):
-    """Weekday bitmask for meal plan schedules. Bit 6=Mon, bit 0=Sun."""
+    """Weekday bitmask for meal plan schedules.
+
+    Bit 6=Mon, bit 0=Sun.
+    """
 
     MON = 1 << 6
     TUE = 1 << 5
@@ -67,13 +70,15 @@ class MealSchedule:
 
     def to_bytes(self) -> bytes:
         """Encode this schedule entry to 5 raw bytes."""
-        return bytes([
-            int(self.days) & 0x7F,
-            self.hour,
-            self.minute,
-            self.portions,
-            1 if self.enabled else 0,
-        ])
+        return bytes(
+            [
+                int(self.days) & 0x7F,
+                self.hour,
+                self.minute,
+                self.portions,
+                1 if self.enabled else 0,
+            ]
+        )
 
     @classmethod
     def from_bytes(cls, data: bytes) -> MealSchedule:
@@ -97,8 +102,15 @@ class MealSchedule:
     def days_str(self) -> str:
         """Format active days as abbreviated names."""
         names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-        flags = [Weekday.MON, Weekday.TUE, Weekday.WED, Weekday.THU,
-                 Weekday.FRI, Weekday.SAT, Weekday.SUN]
+        flags = [
+            Weekday.MON,
+            Weekday.TUE,
+            Weekday.WED,
+            Weekday.THU,
+            Weekday.FRI,
+            Weekday.SAT,
+            Weekday.SUN,
+        ]
         active = [n for n, f in zip(names, flags) if f in self.days]
         if len(active) == 7:
             return "Every day"
@@ -143,7 +155,7 @@ def decode_meal_plan(data: str | bytes) -> list[MealSchedule]:
         raw = data
     if len(raw) % 5 != 0:
         raise ValueError(f"Meal plan data length {len(raw)} is not a multiple of 5")
-    return [MealSchedule.from_bytes(raw[i:i + 5]) for i in range(0, len(raw), 5)]
+    return [MealSchedule.from_bytes(raw[i : i + 5]) for i in range(0, len(raw), 5)]
 
 
 @dataclass(frozen=True)
@@ -178,7 +190,7 @@ class Feeder(BasePetDevice):
 
     Usage::
 
-        async with Feeder("device_id", "192.168.1.103", "local_key", version=3.3) as dev:
+        async with Feeder("id", "192.168.1.103", "key", version=3.3) as dev:
             state = await dev.get_state()
             print(state.food_status)
             await dev.feed(5)

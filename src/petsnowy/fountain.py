@@ -18,13 +18,13 @@ class FountainDPS:
     """
 
     SWITCH = 1
-    WORK_MODE = 2           # "normal", "night"
-    FILTER_DAYS = 3         # 0-90, read-only
-    PUMP_TIME = 4           # pump cleaning days remaining (0-7), read-only
-    FILTER_RESET = 5        # momentary button
-    PUMP_RESET = 6          # momentary button
-    FILTER_LIFE = 7         # filter replacement reminder period (0-90 days)
-    LIGHT = 102             # indicator light on/off
+    WORK_MODE = 2  # "normal", "night"
+    FILTER_DAYS = 3  # 0-90, read-only
+    PUMP_TIME = 4  # pump cleaning days remaining (0-7), read-only
+    FILTER_RESET = 5  # momentary button
+    PUMP_RESET = 6  # momentary button
+    FILTER_LIFE = 7  # filter replacement reminder period (0-90 days)
+    LIGHT = 102  # indicator light on/off
 
 
 class WorkMode(StrEnum):
@@ -49,6 +49,7 @@ class FountainState:
     @classmethod
     def from_dps(cls, dps: dict[str, Any]) -> FountainState:
         """Build a FountainState from a raw DPS dict (string keys)."""
+
         def _bool(key: int, default: bool = False) -> bool:
             v = dps.get(str(key))
             return bool(v) if v is not None else default
@@ -79,7 +80,7 @@ class Fountain(BasePetDevice):
 
     Usage::
 
-        async with Fountain("device_id", "192.168.1.101", "local_key", version=3.3) as dev:
+        async with Fountain("id", "192.168.1.101", "key", version=3.3) as dev:
             state = await dev.get_state()
             print(state.work_mode, state.filter_days)
             await dev.set_work_mode(WorkMode.NIGHT)
