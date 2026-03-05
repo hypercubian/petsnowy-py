@@ -30,6 +30,8 @@ class DeviceState:
     filter_days_remaining: int
     child_locked: bool
     auto_deodorize: bool
+    scheduled_deodorize: bool
+    scheduled_clean: bool
     raw_dps: dict[str, Any]
 
     @property
@@ -86,5 +88,7 @@ class DeviceState:
             filter_days_remaining=_int(DPS.FILTER_DAYS),
             child_locked=child_locked,
             auto_deodorize=_bool(DPS.AUTO_DEODORIZE),
+            scheduled_deodorize=_bool(DPS.SCHEDULED_DEODORIZE),
+            scheduled_clean=_bool(DPS.SCHEDULED_CLEAN),
             raw_dps=dict(dps),
         )

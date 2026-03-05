@@ -40,8 +40,8 @@ class DPS:
     RESET_COMPLETE = 114  # read-only
     EMPTY_CANCEL = 115  # momentary button
     TOILET_RECORD = 116  # string, read-only
-    T_D_SW = 117  # unknown
-    T_CLEASW = 118  # unknown
+    SCHEDULED_DEODORIZE = 117  # enable/disable periodic deodorize schedule
+    SCHEDULED_CLEAN = 118  # enable/disable periodic clean schedule
 
 
 class DeviceStatus(StrEnum):

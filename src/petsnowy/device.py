@@ -92,3 +92,11 @@ class PetSnowy(BasePetDevice):
     async def set_auto_deodorize(self, enabled: bool) -> None:
         """Enable or disable automatic deodorization."""
         await self._set_dps(DPS.AUTO_DEODORIZE, enabled)
+
+    async def set_scheduled_deodorize(self, enabled: bool) -> None:
+        """Enable or disable scheduled periodic deodorization."""
+        await self._set_dps(DPS.SCHEDULED_DEODORIZE, enabled)
+
+    async def set_scheduled_clean(self, enabled: bool) -> None:
+        """Enable or disable scheduled periodic cleaning."""
+        await self._set_dps(DPS.SCHEDULED_CLEAN, enabled)

@@ -166,6 +166,8 @@ async def cmd_litterbox_status(device_type: str) -> None:
         print(f"  Light:              {'ON' if state.light else 'OFF'}")
         print(f"  Child lock:         {'LOCKED' if state.child_locked else 'UNLOCKED'}")
         print(f"  Auto-deodorize:     {'ON' if state.auto_deodorize else 'OFF'}")
+        print(f"  Scheduled deodorize: {'ON' if state.scheduled_deodorize else 'OFF'}")
+        print(f"  Scheduled clean:    {'ON' if state.scheduled_clean else 'OFF'}")
         print(f"  Filter remaining:   {state.filter_days_remaining} days")
 
         if state.notifications:
@@ -337,6 +339,12 @@ def _build_litterbox_commands() -> dict[str, Any]:
         "auto-deodorize": lambda args, dt: cmd_setting(
             dt, "Auto-deodorize", "set_auto_deodorize", _parse_bool(args[0])
         ),
+        "scheduled-deodorize": lambda args, dt: cmd_setting(
+            dt, "Scheduled deodorize", "set_scheduled_deodorize", _parse_bool(args[0])
+        ),
+        "scheduled-clean": lambda args, dt: cmd_setting(
+            dt, "Scheduled clean", "set_scheduled_clean", _parse_bool(args[0])
+        ),
         "monitor": lambda args, dt: cmd_monitor(dt),
     }
 
@@ -414,6 +422,8 @@ Litterbox commands:
   sleep on|off            Toggle sleep mode
   child-lock on|off       Toggle child/pet lock
   auto-deodorize on|off   Toggle auto deodorization
+  scheduled-deodorize on|off  Toggle scheduled deodorization
+  scheduled-clean on|off  Toggle scheduled cleaning
   monitor                 Stream live events""",
     "fountain": """\
 Fountain commands:
