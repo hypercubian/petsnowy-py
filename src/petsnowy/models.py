@@ -32,6 +32,11 @@ class DeviceState:
     auto_deodorize: bool
     raw_dps: dict[str, Any]
 
+    @property
+    def cat_present(self) -> bool:
+        """Return True if a cat is currently in the litter box."""
+        return self.cat_weight > 0
+
     @classmethod
     def from_dps(cls, dps: dict[str, Any]) -> DeviceState:
         """Build a DeviceState from a raw DPS dict (string keys)."""
