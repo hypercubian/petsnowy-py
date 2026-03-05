@@ -51,6 +51,7 @@ class DeviceStatus(StrEnum):
     CLEANING = "cleaning"
     DEODORIZATION = "deodorization"
     SLEEP = "sleep"
+    PET_INTO = "pet_into"
 
 
 class Notification(IntFlag):

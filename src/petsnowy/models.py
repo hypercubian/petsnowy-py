@@ -35,7 +35,7 @@ class DeviceState:
     @property
     def cat_present(self) -> bool:
         """Return True if a cat is currently in the litter box."""
-        return self.cat_weight > 0
+        return self.status == DeviceStatus.PET_INTO
 
     @classmethod
     def from_dps(cls, dps: dict[str, Any]) -> DeviceState:
