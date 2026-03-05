@@ -59,11 +59,23 @@ class DeviceState:
         except ValueError:
             status = DeviceStatus.STANDBY
 
+        # DPS 6 (cat_weight) is not reported by the device. Weight is
+        # encoded in DPS 116 (toilet_record) as a 4-byte hex string:
+        # bytes 0-1 = weight in grams (big-endian), bytes 2-3 = duration in seconds.
+        cat_weight = _int(DPS.CAT_WEIGHT)
+        if cat_weight == 0:
+            toilet_record = dps.get(str(DPS.TOILET_RECORD), "")
+            if isinstance(toilet_record, str) and len(toilet_record) >= 4:
+                try:
+                    cat_weight = int(toilet_record[:4], 16)
+                except ValueError:
+                    pass
+
         return cls(
             switch=_bool(DPS.SWITCH),
             auto_clean=_bool(DPS.AUTO_CLEAN),
             delay_clean_time=_int(DPS.DELAY_CLEAN_TIME, 10),
-            cat_weight=_int(DPS.CAT_WEIGHT),
+            cat_weight=cat_weight,
             excretion_count_today=_int(DPS.EXCRETION_TIMES_DAY),
             excretion_duration_today=_int(DPS.EXCRETION_TIME_DAY),
             sleep_mode=_bool(DPS.SLEEP),
