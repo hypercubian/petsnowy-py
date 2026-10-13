@@ -2,7 +2,14 @@
 
 from .const import DPS, DeviceStatus, Fault, Notification
 from .device import PetSnowy
-from .exceptions import CommandError, ConnectionError, DeviceFaultError, PetSnowyError
+from .exceptions import (
+    CommandError,
+    ConfigError,
+    ConnectionError,
+    CredentialsNotFoundError,
+    DeviceFaultError,
+    PetSnowyError,
+)
 from .feeder import (
     Feeder,
     FeederDPS,
@@ -50,4 +57,6 @@ __all__ = [
     "ConnectionError",
     "DeviceFaultError",
     "CommandError",
+    "ConfigError",
+    "CredentialsNotFoundError",
 ]

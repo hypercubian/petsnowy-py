@@ -6,7 +6,7 @@ import asyncio
 from typing import cast
 
 from ..purifier import Purifier, PurifierFault, PurifierState
-from .common import connect_device
+from .common import connect_device, format_flags
 
 
 async def get_status() -> PurifierState:
@@ -16,26 +16,28 @@ async def get_status() -> PurifierState:
         return await dev.get_state()
 
 
+def format_status(state: PurifierState) -> str:
+    """Return a human-readable summary of purifier state."""
+    lines = [
+        "=== PetSnowy Air Purifier Status ===",
+        "",
+        f"  Power:              {'ON' if state.switch else 'OFF'}",
+        f"  Mode:               {state.mode.value}",
+        f"  Fan speed:          {state.speed}",
+        f"  Ionizer:            {'ON' if state.anion else 'OFF'}",
+        f"  TVOC:               {state.tvoc} ug/m3",
+        f"  Filter remaining:   {state.filter_days} days",
+        f"  Countdown:          {state.countdown_set}",
+        f"  Countdown left:     {state.countdown_left} min",
+        "",
+    ]
+    lines.extend(format_flags("FAULTS", "Faults", state.faults, PurifierFault))
+    return "\n".join(lines)
+
+
 def print_status(state: PurifierState) -> None:
     """Print a human-readable summary of purifier state."""
-    print("=== PetSnowy Air Purifier Status ===")
-    print()
-    print(f"  Power:              {'ON' if state.switch else 'OFF'}")
-    print(f"  Mode:               {state.mode.value}")
-    print(f"  Fan speed:          {state.speed}")
-    print(f"  Ionizer:            {'ON' if state.anion else 'OFF'}")
-    print(f"  TVOC:               {state.tvoc} ug/m3")
-    print(f"  Filter remaining:   {state.filter_days} days")
-    print(f"  Countdown:          {state.countdown_set}")
-    print(f"  Countdown left:     {state.countdown_left} min")
-
-    if state.faults:
-        print("\n  FAULTS:")
-        for fault in PurifierFault:
-            if fault and fault in state.faults:
-                print(f"    - {fault.name}")
-    else:
-        print("\n  Faults:             None")
+    print(format_status(state))
 
 
 async def set_speed(level: str) -> None:
