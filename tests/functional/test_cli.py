@@ -7,11 +7,11 @@ from pathlib import Path
 
 import pytest
 
+from petsnowy import testing as profiles
 from petsnowy.cli import main
 from petsnowy.const import DPS
 from petsnowy.purifier import PurifierDPS
-from tests import fake_tuya as profiles
-from tests.fake_tuya import FakeDevice
+from petsnowy.testing import FakeDevice
 
 UseDevice = Callable[[FakeDevice], FakeDevice]
 

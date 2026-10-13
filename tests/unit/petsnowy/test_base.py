@@ -6,7 +6,7 @@ import pytest
 
 from petsnowy.base import BasePetDevice
 from petsnowy.exceptions import CommandError, ConnectionError
-from tests.fake_tuya import FakeDevice, FakeTuyaNetwork
+from petsnowy.testing import FakeDevice, FakeTuyaNetwork
 
 
 def _base(device: FakeDevice, **overrides: object) -> BasePetDevice:
@@ -76,3 +76,16 @@ async def test_disconnect_swallows_close_errors(
     monkeypatch.setattr(fake_tuya.clients[0], "close", _boom)
     await dev.disconnect()
     await dev.disconnect()  # idempotent
+
+
+async def test_reconnect_starts_a_fresh_dps_cache(
+    fake_tuya: FakeTuyaNetwork, litterbox: FakeDevice
+) -> None:
+    dev = _base(litterbox)
+    await dev.connect()
+    await dev.disconnect()
+    del litterbox.dps["118"]
+    await dev.connect()
+
+    assert "118" not in await dev.get_raw_dps()
+    await dev.disconnect()

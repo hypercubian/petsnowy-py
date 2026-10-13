@@ -93,7 +93,7 @@ poetry run pytest                    # unit + integration + functional
 | functional | `tests/functional/` | Public API and CLI against the fake-Tuya harness (incl. BDD) |
 | e2e | `tests/e2e/` | A real device on the LAN, read-only. `PETSNOWY_E2E=1 poetry run pytest -m e2e` |
 
-`tests/fake_tuya.py` holds the mock harness: an in-memory stand-in for
+`petsnowy.testing` (shipped with the package) holds the mock harness: an in-memory stand-in for
 `tinytuya.Device` that keeps per-device DPS state, applies writes, resets momentary
 buttons and replays monitor events. The `fake_tuya` fixture patches it in at the
 `tinytuya` boundary, so every layer above it runs for real.

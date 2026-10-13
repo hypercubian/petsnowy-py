@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from petsnowy import base
+from petsnowy import testing as profiles
 from petsnowy.registry import (
     ENV_ADDRESS,
     ENV_DEVICE_ID,
@@ -15,8 +16,7 @@ from petsnowy.registry import (
     ENV_LOCAL_KEY,
     ENV_VERSION,
 )
-from tests import fake_tuya as profiles
-from tests.fake_tuya import FakeDevice, FakeTuyaNetwork
+from petsnowy.testing import FakeDevice, FakeTuyaNetwork
 
 _TIERS = ("unit", "integration", "functional", "e2e")
 # Never created: points devices.json lookups away from the real repo-root file.

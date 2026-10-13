@@ -1,8 +1,14 @@
 """In-memory fake of the tinytuya LAN protocol, for deterministic tests.
 
-``FakeTuyaNetwork`` replaces ``tinytuya.Device`` (see the ``fake_tuya`` fixture in
-``tests/conftest.py``). Every layer above tinytuya (device classes, monitor loop,
-registry, CLI) then runs for real against simulated devices that:
+Shipped with the library so dependents (e.g. ha-petsnowy) test against the same
+simulation. Patch it in where tinytuya is used::
+
+    network = FakeTuyaNetwork()
+    monkeypatch.setattr("petsnowy.base.tinytuya.Device", network)
+    device = network.add(litterbox())
+
+Every layer above tinytuya (device classes, monitor loop, registry, CLI) then runs
+for real against simulated devices that:
 
 - answer ``status()`` with their DPS state, or with tinytuya-shaped error payloads
   when unreachable, addressed wrongly, or given the wrong local key or version;
@@ -52,6 +58,7 @@ class FakeDevice:
     # How long an idle receive() blocks (tinytuya's default socket timeout is 5 s).
     receive_timeout: float = _IDLE_POLL_SECONDS
     _events: queue.Queue[object] = field(default_factory=queue.Queue)
+    _push_frames: list[dict[str, Any]] = field(default_factory=list)
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
     # -- Test controls -------------------------------------------------------------
@@ -59,6 +66,20 @@ class FakeDevice:
     def push(self, update: Mapping[str, Any]) -> None:
         """Queue a device-initiated DPS update for the next ``receive()``."""
         self._events.put(dict(update))
+
+    def push_frame(self, update: Mapping[str, Any]) -> None:
+        """Change DPS on the device and make the next status() return only them.
+
+        This is what tinytuya does on a persistent socket: status() returns the next
+        frame, which may be an unsolicited push holding just the changed DPS.
+        """
+        with self._lock:
+            self.dps.update(update)
+            self._push_frames.append(dict(update))
+
+    def take_push_frame(self) -> dict[str, Any] | None:
+        with self._lock:
+            return self._push_frames.pop(0) if self._push_frames else None
 
     def drop_connection(self) -> None:
         """Make the next ``receive()`` report a dropped socket, as tinytuya does."""
@@ -98,7 +119,8 @@ class FakeDevice:
             return dict(ERR_UNREACHABLE)
         if isinstance(event, BaseException):
             raise event
-        assert isinstance(event, dict)
+        if not isinstance(event, dict):
+            raise TypeError(f"unexpected queued event {event!r}")
         with self._lock:
             self.dps.update(event)
         return {"dps": event}
@@ -149,16 +171,17 @@ class FakeTuyaClient:
     def status(self) -> dict[str, Any]:
         device, error = self._session()
         if device is None:
-            assert error is not None
-            return error
+            return error or dict(ERR_UNREACHABLE)
         device.connections += 1
+        frame = device.take_push_frame()
+        if frame is not None:
+            return {"devId": device.device_id, "dps": frame}
         return {"devId": device.device_id, "dps": dict(device.dps)}
 
     def set_value(self, index: int | str, value: Any) -> dict[str, Any]:
         device, error = self._session()
         if device is None:
-            assert error is not None
-            return error
+            return error or dict(ERR_UNREACHABLE)
         dps_id = str(index)
         if dps_id in device.rejected:
             return {"Error": "Device rejected the command", "Err": "900"}
@@ -201,7 +224,7 @@ class FakeTuyaNetwork:
 
 
 # -- Device profiles ---------------------------------------------------------------
-# DPS ids mirror src/petsnowy/{const,fountain,purifier,feeder}.py. Values are shaped
+# DPS ids mirror petsnowy.{const,fountain,purifier,feeder}. Values are shaped
 # like real firmware reports (purifier values from a captured snapshot).
 
 

@@ -24,7 +24,7 @@ from petsnowy import (
     Weekday,
     WorkMode,
 )
-from tests.fake_tuya import FakeDevice
+from petsnowy.testing import FakeDevice
 
 # -- Litterbox ---------------------------------------------------------------------
 
@@ -255,3 +255,45 @@ async def test_monitor_stop_does_no_io_after_disconnect(
 
     assert litterbox.closes == 1
     assert litterbox.io_after_close == 0
+
+
+async def test_partial_push_frame_does_not_reset_other_switches(
+    litterbox: FakeDevice,
+) -> None:
+    # ha-petsnowy #6: turning the light on in the app flipped auto-clean and
+    # auto-deodorize off in HA until the next full poll.
+    async with PetSnowy(
+        litterbox.device_id, litterbox.address, litterbox.local_key
+    ) as dev:
+        litterbox.push_frame({"16": False})
+        state = await dev.get_state()
+
+    assert state.light is False
+    assert state.auto_clean is True
+    assert state.auto_deodorize is True
+    assert state.scheduled_clean is True
+    assert state.cat_weight == 4396
+
+
+async def test_monitor_updates_feed_the_state_cache(litterbox: FakeDevice) -> None:
+    async with PetSnowy(
+        litterbox.device_id, litterbox.address, litterbox.local_key
+    ) as dev:
+        litterbox.push({"10": True})
+        await asyncio.wait_for(_take(dev.monitor(), 1), timeout=5)
+        litterbox.push_frame({"24": "sleep"})
+        state = await dev.get_state()
+
+    assert (state.sleep_mode, state.status) == (True, DeviceStatus.SLEEP)
+
+
+async def test_purifier_manual_mode(purifier: FakeDevice) -> None:
+    async with Purifier(
+        purifier.device_id, purifier.address, purifier.local_key
+    ) as dev:
+        await dev.set_mode("manual")
+        await dev.set_speed("4")
+        state = await dev.get_state()
+
+    assert state.mode is PurifierMode.MANUAL
+    assert state.speed == "4"

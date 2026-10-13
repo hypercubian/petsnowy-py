@@ -7,12 +7,12 @@ from pathlib import Path
 
 import pytest
 
+from petsnowy import testing as profiles
 from petsnowy.feeder import FeederDPS, MealSchedule, Weekday, encode_meal_plan
 from petsnowy.fountain import FountainDPS, WorkMode
 from petsnowy.purifier import PurifierDPS
+from petsnowy.testing import FakeDevice, FakeTuyaNetwork
 from petsnowy.utils import common, feeder, fountain, litterbox, purifier
-from tests import fake_tuya as profiles
-from tests.fake_tuya import FakeDevice, FakeTuyaNetwork
 
 CATEGORIES = {
     "fake-litterbox": "msp",

@@ -41,7 +41,7 @@ cli.py ──> registry.py ──> device classes ──> base.py ──> tinytu
 
 - Four tiers under `tests/{unit,integration,functional,e2e}`. `tests/conftest.py`
   marks each test by its directory and blocks real credentials for non-e2e tests.
-- `tests/fake_tuya.py` is the mock harness: a fake `tinytuya.Device` network with
+- `petsnowy.testing` (in `src/`, shipped so ha-petsnowy reuses it) is the mock harness: a fake `tinytuya.Device` network with
   per-device DPS state, key/version/reachability checks, momentary buttons, firmware
   reactions and a monitor event queue. Use the `fake_tuya`, `use_device` and
   per-device fixtures. Do not mock the device classes themselves.

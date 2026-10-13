@@ -9,11 +9,11 @@ from dataclasses import dataclass
 import pytest
 from pytest_bdd import given, parsers, scenarios, then, when
 
+from petsnowy import testing as profiles
 from petsnowy.cli import main
 from petsnowy.const import DPS
 from petsnowy.models import DeviceState
-from tests import fake_tuya as profiles
-from tests.fake_tuya import FakeDevice
+from petsnowy.testing import FakeDevice
 
 pytestmark = pytest.mark.bdd
 

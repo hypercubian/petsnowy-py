@@ -75,7 +75,9 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        python-version: ['3.11', '3.12', '3.13']
+        # 3.14 beyond the standard's three-version window: Home Assistant (the main
+        # consumer, via ha-petsnowy) runs on 3.14.
+        python-version: ['3.11', '3.12', '3.13', '3.14']
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
