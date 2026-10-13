@@ -1,69 +1,126 @@
 [tool.poetry]
 name = "petsnowy"
-version = "0.1.0"
+version = "0.2.0"
 description = "Async Python library for local-network control of PetSnowy devices (litterbox, fountain, purifier, feeder) via Tuya protocol"
+authors = ["Babak Takand <takandb@gmail.com>"]
+readme = "README.md"
 license = "MIT"
-authors = []
-packages = [{include = "petsnowy", from = "src"}]
+repository = "https://github.com/hypercubian/petsnowy-py"
+packages = [{ include = "petsnowy", from = "src" }]
 
 [tool.poetry.dependencies]
 python = "^3.11"
-tinytuya = ">=1.15"
+tinytuya = ">=1.15,<2.0"
+
+[tool.poetry.scripts]
+petsnowy = "petsnowy.cli:main"
 
 [tool.poetry.group.dev.dependencies]
-pytest = "*"
-pytest-asyncio = "*"
-pytest-bdd = "*"
-black = "*"
-isort = "*"
-flake8 = "*"
+# Testing
+pytest = ">=7.0"
+pytest-asyncio = ">=0.24"
+pytest-cov = ">=7.0"
+pytest-bdd = "^8.1.0"
+
+# Formatters
+black = "26.3.1"
+isort = "6.0.1"
+docformatter = ">=1.7"
+pyupgrade = ">=3.20"
+
+# Linters / type-checkers / security
+flake8 = "7.3.0"
 flake8-bugbear = "*"
 flake8-comprehensions = "*"
 flake8-docstrings = "*"
-bandit = "*"
-mypy = "*"
-pylint = "*"
-pre-commit = "*"
-detect-secrets = "*"
-docformatter = "*"
-pyupgrade = "*"
+mypy = "1.20.2"
+bandit = "1.8.6"
+pylint = ">=3.3"
+
+# Hooks / secrets
+pre-commit = ">=4.3"
+detect-secrets = ">=1.5"
+
+# QA scanners (the platinum-standard scanner suite). Tracks main because
+# qaplat has no release tag yet; poetry.lock pins the resolved commit.
+qaplat = { git = "https://github.com/hypercubian/hypercubian-qa-platinum-standards.git", branch = "main" }
 
 [build-system]
-requires = ["poetry-core"]
+requires = ["poetry-core>=1.0.0"]
 build-backend = "poetry.core.masonry.api"
 
-[tool.mypy]
-python_version = "3.11"
-disallow_untyped_defs = true
-disallow_untyped_decorators = true
-disallow_any_generics = true
-warn_redundant_casts = true
-warn_unused_configs = true
-warn_unused_ignores = true
-warn_unreachable = true
-show_error_context = true
-show_error_codes = true
+# ----------------------------------------------------------------------
+# Tooling configuration (hypercubian-qa-platinum-standards templates/pyproject.toml)
+# ----------------------------------------------------------------------
 
-[[tool.mypy.overrides]]
-module = [
-    "tinytuya.*",
-]
-ignore_missing_imports = true
+[tool.black]
+line-length = 88
+target-version = ["py311"]
 
 [tool.isort]
 profile = "black"
 
-[tool.bandit]
-exclude_dirs = ["tests"]
-skips = ["B110"]
+[tool.mypy]
+python_version = "3.11"
+strict = true
+disallow_untyped_defs = true
+disallow_untyped_decorators = true
+disallow_any_generics = true
+warn_unreachable = true
+show_error_codes = true
+
+[[tool.mypy.overrides]]
+# tinytuya ships no type information.
+module = ["tinytuya", "tinytuya.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
+testpaths = ["tests"]
 markers = [
-    "functional: marks tests as functional tests",
-    "bdd: marks tests as BDD tests",
-    "integration: marks tests as integration tests",
-    "slow: marks tests as slow running",
+    "unit: fast, isolated tests of pure logic (no IO, no subprocess)",
+    "integration: tests that exercise external boundaries (subprocess, network, filesystem)",
+    "functional: end-to-end scenarios driven through the public CLI or API",
+    "e2e: full-stack scenarios against a real device on the LAN (needs PETSNOWY_E2E=1)",
+    "bdd: pytest-bdd feature scenarios (Gherkin notation, optional within functional/e2e)",
+    "slow: slow-running tests",
 ]
-python_files = ["test_*.py"]
-python_classes = ["Test*"]
-python_functions = ["test_*"]
+addopts = "--strict-markers -m 'not e2e'"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.bandit]
+exclude_dirs = ["tests", ".venv"]
+
+[tool.coverage.run]
+source = ["src/petsnowy"]
+
+[tool.coverage.report]
+fail_under = 85
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+]
+
+[tool.pylint.main]
+ignore-paths = ["^tests/.*$"]
+
+# ----------------------------------------------------------------------
+# qaplat scanner configuration
+# ----------------------------------------------------------------------
+
+[tool.qaplat.scanners.prints]
+# The CLI and the per-device utils (the documented interactive helpers in
+# CLAUDE.md) are the only user-facing printers; everything else logs.
+exclude_path_parts = ["cli", "utils"]
+
+[tool.qaplat.scanners.test_placement]
+package = "petsnowy"
+allowed_tiers = ["unit", "integration", "functional", "e2e"]
+
+[tool.qaplat.scanners.notebooks]
+allow_paths = []
+
+[tool.qaplat.scanners.allowed_paths]
+allowed = ["src", "tests", "docs", ".github"]

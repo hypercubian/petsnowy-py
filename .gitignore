@@ -1,13 +1,40 @@
-.claude/
+# Python / tooling
 __pycache__/
-*.pyc
+*.py[cod]
 *.egg-info/
+*.egg
+.eggs/
+.venv/
+.pytest_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
 dist/
 build/
-.eggs/
-*.egg
+*.log
+
+# Editors / OS
+.idea/
+.vscode/
+.claude/
+.DS_Store
+
+# Local environment files (never commit)
 .env
+.env.*
+!.env.example
+
+# Device credentials and captures (tinytuya wizard output: local keys, cloud API secret)
 devices.json
 snapshot.json
 tinytuya.json
 tuya-raw.json
+
+# Common credential filenames
+*.token
+*-token
+credentials.json
+*.pem
+*.key
+*.p12

@@ -1,20 +1,24 @@
+default_install_hook_types: [pre-commit, pre-push]
+
+# The platinum-standard split:
+#   pre-commit  -> fast, in-place fixes (formatters + lightweight checks)
+#   pre-push    -> slow, comprehensive (mypy, full pytest)
+#
+# Rationale: pre-commit must be near-instant or developers learn to
+# bypass it. pre-push gives strong guarantees before code leaves the
+# laptop, at the cost of a few seconds.
+
 repos:
+  # -- Phase 1: Formatters --------------------------------------------
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v5.0.0
+    rev: v6.0.0
     hooks:
       - id: trailing-whitespace
         args: [--markdown-linebreak-ext=md]
       - id: end-of-file-fixer
-      - id: check-yaml
-      - id: check-toml
-      - id: check-json
-      - id: check-added-large-files
-        args: [--maxkb=1000]
-      - id: check-merge-conflict
-      - id: debug-statements
 
   - repo: https://github.com/asottile/pyupgrade
-    rev: v3.19.1
+    rev: v3.20.0
     hooks:
       - id: pyupgrade
         args: [--py311-plus]
@@ -26,19 +30,39 @@ repos:
         args: [--in-place, --wrap-summaries=88, --wrap-descriptions=88, --recursive]
 
   - repo: https://github.com/psf/black
-    rev: 24.10.0
+    rev: 26.3.1
     hooks:
       - id: black
         language_version: python3
+        args: ["--target-version", "py311"]
 
   - repo: https://github.com/pycqa/isort
-    rev: 5.13.2
+    rev: 6.0.1
     hooks:
       - id: isort
         args: ["--profile", "black"]
 
+  # -- Phase 2: Fast checks -------------------------------------------
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-yaml
+      - id: check-toml
+      - id: check-json
+      - id: check-added-large-files
+        args: [--maxkb=500]
+      - id: check-merge-conflict
+      - id: debug-statements
+
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        args: ["--baseline", ".secrets.baseline"]
+
+  # -- Phase 3: Linters -----------------------------------------------
   - repo: https://github.com/pycqa/flake8
-    rev: 7.1.1
+    rev: 7.3.0
     hooks:
       - id: flake8
         additional_dependencies:
@@ -47,41 +71,74 @@ repos:
           - flake8-docstrings
         args:
           - --max-line-length=88
-          - --extend-ignore=E203,W503,D100,D101,D102,D103,D104,D105,D107
+          - --extend-ignore=E203,W503,D100,D101,D102,D103,D104,D105,D107,D202,D205,D209,D400,D401,D402
           - --max-complexity=15
+          - --per-file-ignores=tests/**/*.py:F401,F811,E501
 
   - repo: https://github.com/PyCQA/bandit
-    rev: 1.8.3
+    rev: 1.8.6
     hooks:
       - id: bandit
         args: ["-c", "pyproject.toml"]
-        additional_dependencies: ["toml"]
         exclude: ^tests/
 
+  # -- Phase 4: qaplat scanners (system hooks) ------------------------
+  # These are local hooks that shell out to the qaplat console scripts
+  # installed via the dev dependency. Comment any out that don't apply
+  # to this project (and remove the matching [tool.qaplat.*] block in
+  # pyproject.toml).
+  - repo: local
+    hooks:
+      - id: qaplat-print-scan
+        name: qaplat (no stray print() outside CLI)
+        entry: poetry run qaplat-print-scan
+        language: system
+        pass_filenames: false
+        types: [python]
+
+      - id: qaplat-test-placement
+        name: qaplat (tests live in unit/integration/functional/e2e)
+        entry: poetry run qaplat-test-placement
+        language: system
+        pass_filenames: false
+
+      - id: qaplat-no-notebooks
+        name: qaplat (no committed Jupyter notebooks)
+        entry: poetry run qaplat-no-notebooks
+        language: system
+        pass_filenames: false
+
+      - id: qaplat-allowed-paths
+        name: qaplat (only whitelisted top-level paths)
+        entry: poetry run qaplat-allowed-paths
+        language: system
+        pass_filenames: false
+
+  # -- Phase 5: Slow checks (pre-push only) ---------------------------
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.13.0
+    rev: v1.20.2
     hooks:
       - id: mypy
+        stages: [pre-push]
         args:
           - --ignore-missing-imports
         exclude: ^tests/
 
-  - repo: https://github.com/Yelp/detect-secrets
-    rev: v1.5.0
-    hooks:
-      - id: detect-secrets
-
   - repo: local
     hooks:
       - id: pylint-essential
-        name: pylint (essential checks)
-        entry: pylint
-        language: python
-        additional_dependencies: [pylint]
+        name: pylint (errors only)
+        entry: poetry run pylint
+        language: system
         types: [python]
         files: ^src/
-        args:
-          - "-rn"
-          - "-sn"
-          - "--errors-only"
-          - "--disable=E0401"
+        stages: [pre-push]
+        args: ["-rn", "-sn", "--errors-only"]
+
+      - id: pytest-quick
+        name: pytest (unit tests)
+        entry: poetry run pytest
+        language: system
+        pass_filenames: false
+        args: [--tb=short, -q, tests/unit/]
+        stages: [pre-push]
