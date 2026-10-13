@@ -38,6 +38,8 @@ class BasePetDevice:
         self._local_key = local_key
         self._version = version
         self._dev: tinytuya.Device | None = None
+        # Last known value of every DPS on this connection. See get_raw_dps().
+        self._dps_cache: dict[str, Any] = {}
 
     # -- Connection lifecycle --------------------------------------------------
 
@@ -55,6 +57,8 @@ class BasePetDevice:
             msg = result.get("Error", "Unknown error") if result else "No response"
             raise ConnectionError(f"Failed to connect to {self._address}: {msg}")
         self._dev = dev
+        self._dps_cache = {}
+        self._merge_dps(result)
         logger.info("Connected to %s at %s", type(self).__name__, self._address)
 
     async def disconnect(self) -> None:
@@ -97,16 +101,27 @@ class BasePetDevice:
     # -- State reading ---------------------------------------------------------
 
     async def get_raw_dps(self) -> dict[str, Any]:
-        """Return the raw DPS dict from the device."""
+        """Return the last known value of every DPS, refreshed from the device.
+
+        On a persistent socket, tinytuya's status() returns whichever frame arrives
+        next. That can be an unsolicited push carrying only the DPS that just changed
+        (from the app, the device buttons, or a set). Merging into a per-connection
+        cache stops those partial frames from resetting every other DPS to its default,
+        which showed up as switches flipping off until the next poll.
+        """
         dev = self._ensure_connected()
         result = await asyncio.to_thread(dev.status)
         if result is None or "Error" in result:
             msg = result.get("Error", "Unknown") if result else "No response"
             raise ConnectionError(f"Failed to read status: {msg}")
+        self._merge_dps(result)
+        return dict(self._dps_cache)
+
+    def _merge_dps(self, result: dict[str, Any]) -> None:
         dps = result.get("dps", {})
         if not isinstance(dps, dict):
             raise ConnectionError(f"Malformed status response: {result!r}")
-        return dps
+        self._dps_cache.update(dps)
 
     # -- Event monitoring ------------------------------------------------------
 
@@ -135,6 +150,7 @@ class BasePetDevice:
             while True:
                 item = await queue.get()
                 if item is not None:
+                    self._dps_cache.update(item)
                     yield item
                     continue
                 logger.info("Monitor: connection lost, reconnecting...")
