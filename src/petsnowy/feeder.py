@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from enum import IntFlag, StrEnum
 from typing import Any
 
+from ._dps import dps_enum
 from .base import BasePetDevice
 
 
@@ -169,11 +170,7 @@ class FeederState:
     @classmethod
     def from_dps(cls, dps: dict[str, Any]) -> FeederState:
         """Build a FeederState from a raw DPS dict (string keys)."""
-        status_raw = dps.get(str(FeederDPS.STATUS), "enough")
-        try:
-            food_status = FoodStatus(status_raw)
-        except ValueError:
-            food_status = FoodStatus.ENOUGH
+        food_status = dps_enum(dps, FeederDPS.STATUS, FoodStatus, FoodStatus.ENOUGH)
 
         cover_raw = dps.get(str(FeederDPS.COVER_STATE))
         cover_closed = cover_raw == 0 if cover_raw is not None else True

@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from ._dps import dps_bool, dps_enum, dps_int
 from .const import DPS, DeviceStatus, Fault, Notification
 
 
@@ -43,35 +44,24 @@ class DeviceState:
     def from_dps(cls, dps: dict[str, Any]) -> DeviceState:
         """Build a DeviceState from a raw DPS dict (string keys)."""
 
-        def _bool(key: int, default: bool = False) -> bool:
-            v = dps.get(str(key))
-            return bool(v) if v is not None else default
+        def _bool(key: int) -> bool:
+            return dps_bool(dps, key)
 
         def _int(key: int, default: int = 0) -> int:
-            v = dps.get(str(key))
-            return int(v) if v is not None else default
+            return dps_int(dps, key, default)
 
         # DPS 104 (lock) is inverted: false=locked, true=unlocked
         lock_raw = dps.get(str(DPS.LOCK))
         child_locked = not lock_raw if lock_raw is not None else False
 
-        status_raw = dps.get(str(DPS.STATUS), "standby")
-        try:
-            status = DeviceStatus(status_raw)
-        except ValueError:
-            status = DeviceStatus.STANDBY
+        status = dps_enum(dps, DPS.STATUS, DeviceStatus, DeviceStatus.STANDBY)
 
         # DPS 6 (cat_weight) is not reported by the device. Weight is
         # encoded in DPS 116 (toilet_record) as a 4-byte hex string:
         # bytes 0-1 = weight in grams (big-endian), bytes 2-3 = duration in seconds.
-        cat_weight = _int(DPS.CAT_WEIGHT)
-        if cat_weight == 0:
-            toilet_record = dps.get(str(DPS.TOILET_RECORD), "")
-            if isinstance(toilet_record, str) and len(toilet_record) >= 4:
-                try:
-                    cat_weight = int(toilet_record[:4], 16)
-                except ValueError:
-                    pass
+        cat_weight = _int(DPS.CAT_WEIGHT) or _toilet_record_weight(
+            dps.get(str(DPS.TOILET_RECORD))
+        )
 
         return cls(
             switch=_bool(DPS.SWITCH),
@@ -92,3 +82,13 @@ class DeviceState:
             scheduled_clean=_bool(DPS.SCHEDULED_CLEAN),
             raw_dps=dict(dps),
         )
+
+
+def _toilet_record_weight(record: object) -> int:
+    """Return the cat weight in grams from a DPS 116 hex record, or 0 if unparseable."""
+    if not isinstance(record, str) or len(record) < 4:
+        return 0
+    try:
+        return int(record[:4], 16)
+    except ValueError:
+        return 0
