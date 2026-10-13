@@ -19,7 +19,7 @@ class PurifierDPS:
     """
 
     SWITCH = 1
-    MODE = 3  # "auto", "sleep"
+    MODE = 3  # "auto", "manual", "sleep"
     SPEED = 4  # "1"-"6"
     ANION = 6  # ionizer on/off
     TVOC = 14  # 0-1000 ug/m3, read-only
@@ -33,6 +33,7 @@ class PurifierMode(StrEnum):
     """Purifier operating mode (DPS 3)."""
 
     AUTO = "auto"
+    MANUAL = "manual"
     SLEEP = "sleep"
 
 
@@ -110,7 +111,7 @@ class Purifier(BasePetDevice):
     # -- Settings --------------------------------------------------------------
 
     async def set_mode(self, mode: str | PurifierMode) -> None:
-        """Set the purifier mode ('auto' or 'sleep')."""
+        """Set the purifier mode ('auto', 'manual' or 'sleep')."""
         await self._set_dps(PurifierDPS.MODE, str(PurifierMode(mode)))
 
     async def set_speed(self, level: str) -> None:
