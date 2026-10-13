@@ -16,16 +16,25 @@ async def get_status() -> FountainState:
         return await dev.get_state()
 
 
+def format_status(state: FountainState) -> str:
+    """Return a human-readable summary of fountain state."""
+    return "\n".join(
+        [
+            "=== PetSnowy Water Fountain Status ===",
+            "",
+            f"  Power:              {'ON' if state.switch else 'OFF'}",
+            f"  Work mode:          {state.work_mode.value}",
+            f"  Filter remaining:   {state.filter_days} days",
+            f"  Pump clean in:      {state.pump_time} days",
+            f"  Light:              {'ON' if state.light else 'OFF'}",
+            f"  Filter reminder:    {state.filter_life} days",
+        ]
+    )
+
+
 def print_status(state: FountainState) -> None:
     """Print a human-readable summary of fountain state."""
-    print("=== PetSnowy Water Fountain Status ===")
-    print()
-    print(f"  Power:              {'ON' if state.switch else 'OFF'}")
-    print(f"  Work mode:          {state.work_mode.value}")
-    print(f"  Filter remaining:   {state.filter_days} days")
-    print(f"  Pump clean in:      {state.pump_time} days")
-    print(f"  Light:              {'ON' if state.light else 'OFF'}")
-    print(f"  Filter reminder:    {state.filter_life} days")
+    print(format_status(state))
 
 
 async def set_light(enabled: bool) -> None:

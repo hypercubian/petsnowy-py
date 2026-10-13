@@ -16,12 +16,21 @@ async def get_status() -> FeederState:
         return await dev.get_state()
 
 
+def format_status(state: FeederState) -> str:
+    """Return a human-readable summary of feeder state."""
+    return "\n".join(
+        [
+            "=== PetSnowy Pet Feeder Status ===",
+            "",
+            f"  Food level:         {state.food_status.value}",
+            f"  Cover:              {'closed' if state.cover_closed else 'open'}",
+        ]
+    )
+
+
 def print_status(state: FeederState) -> None:
     """Print a human-readable summary of feeder state."""
-    print("=== PetSnowy Pet Feeder Status ===")
-    print()
-    print(f"  Food level:         {state.food_status.value}")
-    print(f"  Cover:              {'closed' if state.cover_closed else 'open'}")
+    print(format_status(state))
 
 
 async def dump_raw_dps() -> dict[str, object]:

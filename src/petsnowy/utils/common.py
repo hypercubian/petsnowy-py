@@ -3,43 +3,20 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
+from collections.abc import Mapping
+from enum import IntFlag
 from typing import Any
 
 import tinytuya
 
+from .._dps import dps_names
 from ..base import BasePetDevice
-from ..device import PetSnowy
-from ..feeder import Feeder
-from ..fountain import Fountain
-from ..purifier import Purifier
-
-DEVICE_REGISTRY: dict[str, dict[str, Any]] = {
-    "litterbox": {
-        "class": PetSnowy,
-        "product_ids": {"bdfimkssp9ews36b"},
-        "categories": {"msp"},
-        "default_version": 3.4,
-    },
-    "fountain": {
-        "class": Fountain,
-        "product_ids": {"6atwtbtrc6xszdem"},
-        "categories": {"cwysj"},
-        "default_version": 3.3,
-    },
-    "purifier": {
-        "class": Purifier,
-        "product_ids": {"tlqmw4ej2ym37kcv"},
-        "categories": {"kj"},
-        "default_version": 3.4,
-    },
-    "feeder": {
-        "class": Feeder,
-        "product_ids": {"xamrfcvbiz64but3"},
-        "categories": {"cwwsq"},
-        "default_version": 3.3,
-    },
-}
+from ..const import DPS, Fault, Notification
+from ..registry import (
+    create_device,
+    credentials_from_devices_json,
+    default_search_paths,
+)
 
 
 def find_device_in_json(device_type: str) -> tuple[str, str, str, float]:
@@ -55,27 +32,8 @@ def find_device_in_json(device_type: str) -> tuple[str, str, str, float]:
         FileNotFoundError: No devices.json found.
         KeyError: No matching device entry for the requested type.
     """
-    candidates = [
-        Path.cwd() / "devices.json",
-        Path(__file__).resolve().parent.parent.parent.parent / "devices.json",
-    ]
-    for path in candidates:
-        if not path.exists():
-            continue
-        with open(path) as f:
-            devices = json.load(f)
-        info = DEVICE_REGISTRY[device_type]
-        for dev in devices:
-            pid = dev.get("product_id", "")
-            cat = dev.get("category", "")
-            if pid in info["product_ids"] or cat in info["categories"]:
-                return (
-                    dev["id"],
-                    dev.get("ip", ""),
-                    dev["key"],
-                    float(dev.get("version", info["default_version"])),
-                )
-    raise KeyError(f"No {device_type} device found in devices.json")
+    creds = credentials_from_devices_json(device_type)
+    return creds.device_id, creds.address, creds.local_key, creds.version
 
 
 def connect_device(device_type: str) -> BasePetDevice:
@@ -86,9 +44,7 @@ def connect_device(device_type: str) -> BasePetDevice:
         async with connect_device("purifier") as dev:
             ...
     """
-    device_id, address, local_key, version = find_device_in_json(device_type)
-    cls = DEVICE_REGISTRY[device_type]["class"]
-    return cls(device_id, address, local_key, version=version)
+    return create_device(device_type, credentials_from_devices_json(device_type))
 
 
 def cloud_client() -> tinytuya.Cloud:
@@ -99,15 +55,10 @@ def cloud_client() -> tinytuya.Cloud:
     Raises:
         FileNotFoundError: No tinytuya.json found.
     """
-    candidates = [
-        Path.cwd() / "tinytuya.json",
-        Path(__file__).resolve().parent.parent.parent.parent / "tinytuya.json",
-    ]
-    for path in candidates:
-        if not path.exists():
+    for path in default_search_paths("tinytuya.json"):
+        if not path.is_file():
             continue
-        with open(path) as f:
-            creds = json.load(f)
+        creds = json.loads(path.read_text(encoding="utf-8"))
         return tinytuya.Cloud(
             apiRegion=creds["apiRegion"],
             apiKey=creds["apiKey"],
@@ -132,3 +83,40 @@ def cloud_get_dps(device_type: str) -> dict[str, Any]:
     if not result.get("success"):
         raise RuntimeError(f"Cloud API error: {result}")
     return {item["code"]: item["value"] for item in result.get("result", [])}
+
+
+def flag_names(value: IntFlag, flag_cls: type[IntFlag]) -> list[str]:
+    """Return the names of the single-bit members of ``flag_cls`` set in ``value``."""
+    return [str(flag.name) for flag in flag_cls if flag and flag in value]
+
+
+def format_flags(
+    active_title: str, empty_title: str, value: IntFlag, flag_cls: type[IntFlag]
+) -> list[str]:
+    """Return status lines listing the set flags, or a single 'None' line."""
+    names = flag_names(value, flag_cls)
+    if not names:
+        return [f"  {empty_title + ':':<20}None"]
+    return [f"  {active_title}:", *(f"    - {name}" for name in names)]
+
+
+def format_update(update: Mapping[str, Any], dps_cls: type) -> list[str]:
+    """Return one ``name: value`` line per DPS in a monitor update.
+
+    Names come from ``dps_cls`` (the device's ``*DPS`` constants). Litterbox
+    notification and fault bitmasks are expanded to flag names.
+    """
+    names = dps_names(dps_cls)
+    bitmasks: dict[str, type[IntFlag]] = (
+        {str(DPS.NOTIFICATION): Notification, str(DPS.FAULT): Fault}
+        if dps_cls is DPS
+        else {}
+    )
+    lines = []
+    for key, value in update.items():
+        name = names.get(key, f"dps_{key}")
+        flag_cls = bitmasks.get(key)
+        if flag_cls is not None and isinstance(value, int):
+            value = flag_names(flag_cls(value), flag_cls) or "none"
+        lines.append(f"  {name}: {value}")
+    return lines

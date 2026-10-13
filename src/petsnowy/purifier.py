@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from enum import IntFlag, StrEnum
 from typing import Any
 
+from ._dps import dps_bool, dps_enum, dps_int, dps_str
 from .base import BasePetDevice
 
 
@@ -18,7 +19,7 @@ class PurifierDPS:
     """
 
     SWITCH = 1
-    MODE = 3  # "auto", "sleep"
+    MODE = 3  # "auto", "manual", "sleep"
     SPEED = 4  # "1"-"6"
     ANION = 6  # ionizer on/off
     TVOC = 14  # 0-1000 ug/m3, read-only
@@ -32,6 +33,7 @@ class PurifierMode(StrEnum):
     """Purifier operating mode (DPS 3)."""
 
     AUTO = "auto"
+    MANUAL = "manual"
     SLEEP = "sleep"
 
 
@@ -64,34 +66,16 @@ class PurifierState:
     def from_dps(cls, dps: dict[str, Any]) -> PurifierState:
         """Build a PurifierState from a raw DPS dict (string keys)."""
 
-        def _bool(key: int, default: bool = False) -> bool:
-            v = dps.get(str(key))
-            return bool(v) if v is not None else default
-
-        def _int(key: int, default: int = 0) -> int:
-            v = dps.get(str(key))
-            return int(v) if v is not None else default
-
-        def _str(key: int, default: str = "") -> str:
-            v = dps.get(str(key))
-            return str(v) if v is not None else default
-
-        mode_raw = dps.get(str(PurifierDPS.MODE), "auto")
-        try:
-            mode = PurifierMode(mode_raw)
-        except ValueError:
-            mode = PurifierMode.AUTO
-
         return cls(
-            switch=_bool(PurifierDPS.SWITCH),
-            mode=mode,
-            speed=_str(PurifierDPS.SPEED, "1"),
-            anion=_bool(PurifierDPS.ANION),
-            tvoc=_int(PurifierDPS.TVOC),
-            filter_days=_int(PurifierDPS.FILTER_DAYS),
-            countdown_set=_str(PurifierDPS.COUNTDOWN_SET, "cancel"),
-            countdown_left=_int(PurifierDPS.COUNTDOWN_LEFT),
-            faults=PurifierFault(_int(PurifierDPS.FAULT)),
+            switch=dps_bool(dps, PurifierDPS.SWITCH),
+            mode=dps_enum(dps, PurifierDPS.MODE, PurifierMode, PurifierMode.AUTO),
+            speed=dps_str(dps, PurifierDPS.SPEED, "1"),
+            anion=dps_bool(dps, PurifierDPS.ANION),
+            tvoc=dps_int(dps, PurifierDPS.TVOC),
+            filter_days=dps_int(dps, PurifierDPS.FILTER_DAYS),
+            countdown_set=dps_str(dps, PurifierDPS.COUNTDOWN_SET, "cancel"),
+            countdown_left=dps_int(dps, PurifierDPS.COUNTDOWN_LEFT),
+            faults=PurifierFault(dps_int(dps, PurifierDPS.FAULT)),
             raw_dps=dict(dps),
         )
 
@@ -127,7 +111,7 @@ class Purifier(BasePetDevice):
     # -- Settings --------------------------------------------------------------
 
     async def set_mode(self, mode: str | PurifierMode) -> None:
-        """Set the purifier mode ('auto' or 'sleep')."""
+        """Set the purifier mode ('auto', 'manual' or 'sleep')."""
         await self._set_dps(PurifierDPS.MODE, str(PurifierMode(mode)))
 
     async def set_speed(self, level: str) -> None:

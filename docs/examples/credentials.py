@@ -9,8 +9,7 @@ from pathlib import Path
 
 
 def print_guide() -> None:
-    print(
-        """
+    print("""
 === PetSnowy Tuya Credential Setup ===
 
 You need three values to control your PetSnowy locally:
@@ -73,8 +72,7 @@ You need three values to control your PetSnowy locally:
     ) as dev:
         state = await dev.get_state()
         print(state)
-"""
-    )
+""")
 
 
 def check_devices_json() -> None:

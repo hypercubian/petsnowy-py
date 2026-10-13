@@ -2,11 +2,8 @@
 
 import asyncio
 import os
-import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-
-from petsnowy import Fault, Notification, PetSnowy  # noqa: E402
+from petsnowy import Fault, Notification, PetSnowy
 
 # Replace with your actual credentials
 DEVICE_ID = os.environ.get("PETSNOWY_DEVICE_ID", "your_device_id")

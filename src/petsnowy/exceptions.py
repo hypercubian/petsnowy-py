@@ -26,3 +26,15 @@ class DeviceFaultError(PetSnowyError):
 
 class CommandError(PetSnowyError):
     """A command was rejected or failed to execute."""
+
+
+class ConfigError(PetSnowyError, ValueError):
+    """Credentials configuration is malformed (devices.json, PETSNOWY_* values).
+
+    Also a ValueError, so callers that caught the underlying JSON or number parsing
+    errors keep working.
+    """
+
+
+class CredentialsNotFoundError(PetSnowyError):
+    """No device credentials were found in the environment or devices.json."""

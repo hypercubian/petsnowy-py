@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
+from ._dps import dps_bool, dps_enum, dps_int
 from .base import BasePetDevice
 
 
@@ -50,27 +51,13 @@ class FountainState:
     def from_dps(cls, dps: dict[str, Any]) -> FountainState:
         """Build a FountainState from a raw DPS dict (string keys)."""
 
-        def _bool(key: int, default: bool = False) -> bool:
-            v = dps.get(str(key))
-            return bool(v) if v is not None else default
-
-        def _int(key: int, default: int = 0) -> int:
-            v = dps.get(str(key))
-            return int(v) if v is not None else default
-
-        mode_raw = dps.get(str(FountainDPS.WORK_MODE), "normal")
-        try:
-            work_mode = WorkMode(mode_raw)
-        except ValueError:
-            work_mode = WorkMode.NORMAL
-
         return cls(
-            switch=_bool(FountainDPS.SWITCH),
-            work_mode=work_mode,
-            filter_days=_int(FountainDPS.FILTER_DAYS),
-            pump_time=_int(FountainDPS.PUMP_TIME),
-            filter_life=_int(FountainDPS.FILTER_LIFE),
-            light=_bool(FountainDPS.LIGHT),
+            switch=dps_bool(dps, FountainDPS.SWITCH),
+            work_mode=dps_enum(dps, FountainDPS.WORK_MODE, WorkMode, WorkMode.NORMAL),
+            filter_days=dps_int(dps, FountainDPS.FILTER_DAYS),
+            pump_time=dps_int(dps, FountainDPS.PUMP_TIME),
+            filter_life=dps_int(dps, FountainDPS.FILTER_LIFE),
+            light=dps_bool(dps, FountainDPS.LIGHT),
             raw_dps=dict(dps),
         )
 

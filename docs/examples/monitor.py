@@ -3,12 +3,9 @@
 import asyncio
 import os
 import signal
-import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
-
-from petsnowy import Fault, Notification, PetSnowy  # noqa: E402
-from petsnowy.const import DPS  # noqa: E402
+from petsnowy import Fault, Notification, PetSnowy
+from petsnowy.const import DPS
 
 DEVICE_ID = os.environ.get("PETSNOWY_DEVICE_ID", "your_device_id")
 ADDRESS = os.environ.get("PETSNOWY_ADDRESS", "192.168.1.100")

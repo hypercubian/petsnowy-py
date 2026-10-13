@@ -1,503 +1,392 @@
 """CLI for quick PetSnowy device commands.
 
 Usage:
-    python -m petsnowy status                           Litterbox status (default)
-    python -m petsnowy clean                            Litterbox clean cycle
-    python -m petsnowy monitor                          Litterbox event stream
+    petsnowy status                           Litterbox status (default device)
+    petsnowy clean                            Litterbox clean cycle
+    petsnowy monitor                          Litterbox event stream
 
-    python -m petsnowy --device fountain status          Fountain status
-    python -m petsnowy --device fountain set-work-mode night
-    python -m petsnowy --device fountain reset-filter
+    petsnowy --device fountain status         Fountain status
+    petsnowy --device fountain set-work-mode night
+    petsnowy --device purifier set-speed 3
+    petsnowy --device feeder feed 5
 
-    python -m petsnowy --device purifier status          Purifier status
-    python -m petsnowy --device purifier set-mode auto
-    python -m petsnowy --device purifier set-speed 3
-
-    python -m petsnowy --device feeder status             Feeder status
-    python -m petsnowy --device feeder feed 5
-
-Credentials are read from devices.json (tinytuya wizard output) or env vars:
-    PETSNOWY_DEVICE_ID, PETSNOWY_ADDRESS, PETSNOWY_LOCAL_KEY
+Credentials are read from env vars (PETSNOWY_DEVICE_ID, PETSNOWY_ADDRESS,
+PETSNOWY_LOCAL_KEY, optional PETSNOWY_VERSION) or devices.json (tinytuya wizard
+output). Exit codes: 0 success, 1 device or connection error, 2 usage error.
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
-import os
 import sys
-from pathlib import Path
-from typing import Any, cast
+from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import dataclass
+from typing import cast
 
 from .base import BasePetDevice
-from .const import DPS, Fault, Notification
 from .device import PetSnowy
+from .exceptions import PetSnowyError
 from .feeder import Feeder
-from .fountain import Fountain
-from .purifier import Purifier, PurifierFault
+from .fountain import Fountain, WorkMode
+from .purifier import Purifier, PurifierMode
+from .registry import DEVICE_SPECS, create_device, resolve_credentials
+from .utils import feeder as feeder_utils
+from .utils import fountain as fountain_utils
+from .utils import litterbox as litterbox_utils
+from .utils import purifier as purifier_utils
+from .utils.common import format_update
 
-# -- Device registry -----------------------------------------------------------
+EXIT_OK = 0
+EXIT_ERROR = 1
+EXIT_USAGE = 2
 
-DEVICE_REGISTRY: dict[str, dict[str, Any]] = {
-    "litterbox": {
-        "class": PetSnowy,
-        "product_ids": {"bdfimkssp9ews36b"},
-        "categories": {"msp"},
-        "default_version": 3.4,
-    },
-    "fountain": {
-        "class": Fountain,
-        "product_ids": {"6atwtbtrc6xszdem"},
-        "categories": {"cwysj"},
-        "default_version": 3.3,
-    },
-    "purifier": {
-        "class": Purifier,
-        "product_ids": {"tlqmw4ej2ym37kcv"},
-        "categories": {"kj"},
-        "default_version": 3.4,
-    },
-    "feeder": {
-        "class": Feeder,
-        "product_ids": {"xamrfcvbiz64but3"},
-        "categories": {"cwwsq"},
-        "default_version": 3.3,
-    },
-}
+DEFAULT_DEVICE = "litterbox"
+
+Action = Callable[[BasePetDevice, str], Awaitable[None]]
 
 
-def _device_type_from_json(dev_entry: dict[str, Any]) -> str | None:
-    """Match a devices.json entry to a device type name."""
-    pid = dev_entry.get("product_id", "")
-    cat = dev_entry.get("category", "")
-    for name, info in DEVICE_REGISTRY.items():
-        if pid in info["product_ids"] or cat in info["categories"]:
-            return name
-    return None
+class UsageError(ValueError):
+    """The command line is malformed; reported with exit code 2."""
 
 
-# -- Credential resolution -----------------------------------------------------
+# -- Argument parsers -------------------------------------------------------------
 
 
-def _find_credentials(
-    device_type: str = "litterbox",
-) -> tuple[str, str, str, float, str]:
-    """Resolve device credentials, returning (id, address, key, version, type).
-
-    Checks env vars first, then searches devices.json.
-    """
-    device_id = os.environ.get("PETSNOWY_DEVICE_ID")
-    address = os.environ.get("PETSNOWY_ADDRESS")
-    local_key = os.environ.get("PETSNOWY_LOCAL_KEY")
-    version = float(os.environ.get("PETSNOWY_VERSION", "0"))
-
-    if device_id and address and local_key:
-        if version == 0:
-            version = DEVICE_REGISTRY[device_type]["default_version"]
-        return device_id, address, local_key, version, device_type
-
-    # Search for devices.json
-    candidates = [
-        Path.cwd() / "devices.json",
-        Path(__file__).resolve().parent.parent.parent / "devices.json",
-    ]
-    for path in candidates:
-        if not path.exists():
-            continue
-        with open(path) as f:
-            devices = json.load(f)
-        for dev in devices:
-            matched_type = _device_type_from_json(dev)
-            if matched_type == device_type:
-                return (
-                    dev["id"],
-                    dev.get("ip", ""),
-                    dev["key"],
-                    float(
-                        dev.get(
-                            "version", DEVICE_REGISTRY[device_type]["default_version"]
-                        )
-                    ),
-                    device_type,
-                )
-
-    print(f"Error: No {device_type} credentials found.", file=sys.stderr)
-    print(
-        "Set PETSNOWY_DEVICE_ID, PETSNOWY_ADDRESS, PETSNOWY_LOCAL_KEY env vars",
-        file=sys.stderr,
-    )
-    print(
-        "or run 'python -m tinytuya wizard' to generate devices.json", file=sys.stderr
-    )
-    sys.exit(1)
-
-
-def _connect(device_type: str = "litterbox") -> BasePetDevice:
-    device_id, address, local_key, version, dtype = _find_credentials(device_type)
-    cls = DEVICE_REGISTRY[dtype]["class"]
-    return cls(device_id, address, local_key, version=version)
-
-
-def _parse_bool(value: str) -> bool:
-    if value.lower() in ("on", "true", "1", "yes"):
+def parse_bool(value: str) -> bool:
+    lowered = value.lower()
+    if lowered in ("on", "true", "1", "yes"):
         return True
-    if value.lower() in ("off", "false", "0", "no"):
+    if lowered in ("off", "false", "0", "no"):
         return False
-    print(f"Error: expected on/off, got '{value}'", file=sys.stderr)
-    sys.exit(1)
+    raise UsageError(f"expected on/off, got '{value}'")
 
 
-# -- Litterbox commands --------------------------------------------------------
+def parse_int(value: str) -> int:
+    try:
+        return int(value)
+    except ValueError:
+        raise UsageError(f"expected a whole number, got '{value}'") from None
 
 
-async def cmd_litterbox_status(device_type: str) -> None:
-    async with _connect(device_type) as dev:
-        dev = cast(PetSnowy, dev)
-        state = await dev.get_state()
-        print("=== PetSnowy Snow+ Status ===")
+def choice(*allowed: str) -> Callable[[str], str]:
+    """Return a parser accepting only ``allowed`` (case-insensitive)."""
+
+    def _parse(value: str) -> str:
+        if value.lower() not in allowed:
+            raise UsageError(f"expected one of {'|'.join(allowed)}, got '{value}'")
+        return value.lower()
+
+    return _parse
+
+
+# -- Command table ----------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Command:
+    """One CLI command: a device method call, or a custom ``action``.
+
+    Exactly one of ``method`` and ``action`` is set. With ``parse`` the command takes a
+    single argument, converted before connecting so bad input never reaches a device.
+    """
+
+    summary: str
+    method: str | None = None
+    done: str = ""
+    parse: Callable[[str], object] | None = None
+    metavar: str = ""
+    action: Action | None = None
+
+    @property
+    def nargs(self) -> int:
+        return 1 if self.parse is not None else 0
+
+
+def _button(method: str, label: str, summary: str) -> Command:
+    return Command(summary, method=method, done=f"{label} triggered.")
+
+
+def _setting(
+    method: str, label: str, summary: str, parse: Callable[[str], object], metavar: str
+) -> Command:
+    return Command(summary, method=method, done=label, parse=parse, metavar=metavar)
+
+
+def _toggle(method: str, label: str, summary: str) -> Command:
+    return _setting(method, label, summary, parse_bool, "on|off")
+
+
+async def _litterbox_status(dev: BasePetDevice, _device_type: str) -> None:
+    state = await cast(PetSnowy, dev).get_state()
+    print(litterbox_utils.format_status(state))
+
+
+async def _fountain_status(dev: BasePetDevice, _device_type: str) -> None:
+    state = await cast(Fountain, dev).get_state()
+    print(fountain_utils.format_status(state))
+
+
+async def _purifier_status(dev: BasePetDevice, _device_type: str) -> None:
+    state = await cast(Purifier, dev).get_state()
+    print(purifier_utils.format_status(state))
+
+
+async def _feeder_status(dev: BasePetDevice, _device_type: str) -> None:
+    state = await cast(Feeder, dev).get_state()
+    print(feeder_utils.format_status(state))
+
+
+async def _monitor(dev: BasePetDevice, device_type: str) -> None:
+    print(f"Connected to {device_type}.")
+    print("Monitoring for events (Ctrl+C to stop)...\n")
+    dps_cls = DEVICE_SPECS[device_type].dps
+    count = 0
+    async for update in dev.monitor():
+        count += 1
+        print(f"--- Update #{count} ---")
+        print("\n".join(format_update(update, dps_cls)))
         print()
-        print(f"  Status:             {state.status.value}")
-        print(f"  Auto-clean:         {'ON' if state.auto_clean else 'OFF'}")
-        print(f"  Clean delay:        {state.delay_clean_time} min")
-        print(f"  Cat weight:         {state.cat_weight} g")
-        print(f"  Excretions today:   {state.excretion_count_today}")
-        print(f"  Excretion time:     {state.excretion_duration_today} s")
-        print(f"  Sleep mode:         {'ON' if state.sleep_mode else 'OFF'}")
-        print(f"  Light:              {'ON' if state.light else 'OFF'}")
-        print(f"  Child lock:         {'LOCKED' if state.child_locked else 'UNLOCKED'}")
-        print(f"  Auto-deodorize:     {'ON' if state.auto_deodorize else 'OFF'}")
-        print(f"  Scheduled deodorize: {'ON' if state.scheduled_deodorize else 'OFF'}")
-        print(f"  Scheduled clean:    {'ON' if state.scheduled_clean else 'OFF'}")
-        print(f"  Filter remaining:   {state.filter_days_remaining} days")
-
-        if state.notifications:
-            print("\n  Notifications:")
-            for notif in Notification:
-                if notif and notif in state.notifications:
-                    print(f"    - {notif.name}")
-
-        if state.faults:
-            print("\n  FAULTS:")
-            for fault in Fault:
-                if fault and fault in state.faults:
-                    print(f"    - {fault.name}")
-        else:
-            print("\n  Faults:             None")
 
 
-async def cmd_button(device_type: str, name: str, method: str) -> None:
-    async with _connect(device_type) as dev:
-        await getattr(dev, method)()
-        print(f"{name} triggered.")
+_MONITOR = Command("Stream live events", action=_monitor)
+_POWER_ON = Command("Power on", method="turn_on", done="Powered on.")
+_POWER_OFF = Command("Power off", method="turn_off", done="Powered off.")
 
+LITTERBOX_COMMANDS: dict[str, Command] = {
+    "status": Command("Show device state", action=_litterbox_status),
+    "clean": _button("clean", "Clean cycle", "Start manual clean cycle"),
+    "deodorize": _button("deodorize", "Deodorization", "Start deodorization"),
+    "pause": _button("pause", "Pause", "Pause current operation"),
+    "resume": _button("resume", "Resume", "Resume paused operation"),
+    "empty": _button("empty_litter", "Empty litter", "Start emptying litter"),
+    "cancel-empty": _button("cancel_empty", "Cancel empty", "Cancel litter emptying"),
+    "reset-filter": _button("reset_filter", "Filter reset", "Reset filter life"),
+    "calibrate-weight": _button(
+        "calibrate_weight", "Weight calibration", "Calibrate weight sensor"
+    ),
+    "light": _toggle("set_light", "Light", "Toggle indicator light"),
+    "auto-clean": _toggle("set_auto_clean", "Auto-clean", "Toggle automatic cleaning"),
+    "clean-delay": _setting(
+        "set_clean_delay",
+        "Clean delay",
+        "Set auto-clean delay (2-60, even)",
+        parse_int,
+        "<minutes>",
+    ),
+    "sleep": _toggle("set_sleep_mode", "Sleep mode", "Toggle sleep mode"),
+    "child-lock": _toggle("set_child_lock", "Child lock", "Toggle child/pet lock"),
+    "auto-deodorize": _toggle(
+        "set_auto_deodorize", "Auto-deodorize", "Toggle auto deodorization"
+    ),
+    "scheduled-deodorize": _toggle(
+        "set_scheduled_deodorize",
+        "Scheduled deodorize",
+        "Toggle scheduled deodorization",
+    ),
+    "scheduled-clean": _toggle(
+        "set_scheduled_clean", "Scheduled clean", "Toggle scheduled cleaning"
+    ),
+    "monitor": _MONITOR,
+}
 
-async def cmd_setting(device_type: str, name: str, method: str, value: object) -> None:
-    async with _connect(device_type) as dev:
-        await getattr(dev, method)(value)
-        print(f"{name} set to {value}.")
+FOUNTAIN_COMMANDS: dict[str, Command] = {
+    "status": Command("Show fountain state", action=_fountain_status),
+    "on": _POWER_ON,
+    "off": _POWER_OFF,
+    "set-work-mode": _setting(
+        "set_work_mode",
+        "Work mode",
+        "Set operating mode",
+        choice(*(m.value for m in WorkMode)),
+        "|".join(m.value for m in WorkMode),
+    ),
+    "reset-filter": _button("reset_filter", "Filter reset", "Reset filter counter"),
+    "reset-pump": _button("reset_pump", "Pump reset", "Reset pump counter"),
+    "set-filter-reminder": _setting(
+        "set_filter_reminder",
+        "Filter reminder",
+        "Set filter reminder (0-90)",
+        parse_int,
+        "<days>",
+    ),
+    "light": _toggle("set_light", "Light", "Toggle indicator light"),
+    "monitor": _MONITOR,
+}
 
+_COUNTDOWNS = ("cancel", "1h", "2h", "3h", "4h", "5h")
+_SPEEDS = ("1", "2", "3", "4", "5", "6")
 
-async def cmd_monitor(device_type: str) -> None:
-    DPS_NAMES = {
-        str(DPS.SWITCH): "switch",
-        str(DPS.AUTO_CLEAN): "auto_clean",
-        str(DPS.DELAY_CLEAN_TIME): "delay_clean_time",
-        str(DPS.CAT_WEIGHT): "cat_weight",
-        str(DPS.EXCRETION_TIMES_DAY): "excretion_count",
-        str(DPS.EXCRETION_TIME_DAY): "excretion_time",
-        str(DPS.MANUAL_CLEAN): "manual_clean",
-        str(DPS.SLEEP): "sleep_mode",
-        str(DPS.LIGHT): "light",
-        str(DPS.DEODORIZATION): "deodorize",
-        str(DPS.NOTIFICATION): "notification",
-        str(DPS.FAULT): "fault",
-        str(DPS.STATUS): "status",
-        str(DPS.FILTER_DAYS): "filter_days",
-        str(DPS.LOCK): "lock (inverted)",
-        str(DPS.AUTO_DEODORIZE): "auto_deodorize",
-        str(DPS.EMPTY): "empty_litter",
-        str(DPS.PAUSE): "pause",
-        str(DPS.CONTINUE): "resume",
-    }
+PURIFIER_COMMANDS: dict[str, Command] = {
+    "status": Command("Show purifier state", action=_purifier_status),
+    "on": _POWER_ON,
+    "off": _POWER_OFF,
+    "set-mode": _setting(
+        "set_mode",
+        "Mode",
+        "Set operating mode",
+        choice(*(m.value for m in PurifierMode)),
+        "|".join(m.value for m in PurifierMode),
+    ),
+    "set-speed": _setting(
+        "set_speed", "Fan speed", "Set fan speed", choice(*_SPEEDS), "1-6"
+    ),
+    "anion": _toggle("set_anion", "Ionizer", "Toggle ionizer"),
+    "set-countdown": _setting(
+        "set_countdown",
+        "Countdown",
+        "Set auto-off timer",
+        choice(*_COUNTDOWNS),
+        "|".join(_COUNTDOWNS),
+    ),
+    "monitor": _MONITOR,
+}
 
-    async with _connect(device_type) as dev:
-        print(f"Connected to {device_type}.")
-        print("Monitoring for events (Ctrl+C to stop)...\n")
+FEEDER_COMMANDS: dict[str, Command] = {
+    "status": Command("Show feeder state", action=_feeder_status),
+    "feed": _setting(
+        "feed", "Feed", "Dispense food (1-20 portions)", parse_int, "<portions>"
+    ),
+    "quick-feed": _button("quick_feed", "Quick feed", "Dispense 1 portion"),
+    "monitor": _MONITOR,
+}
 
-        count = 0
-        async for update in dev.monitor():
-            count += 1
-            print(f"--- Update #{count} ---")
-            for key, value in update.items():
-                name = DPS_NAMES.get(key, f"dps_{key}")
-                if key == str(DPS.NOTIFICATION) and isinstance(value, int):
-                    notif_flags = Notification(value)
-                    active = [n.name for n in Notification if n and n in notif_flags]
-                    print(f"  {name}: {active or 'none'}")
-                elif key == str(DPS.FAULT) and isinstance(value, int):
-                    fault_flags = Fault(value)
-                    active = [ft.name for ft in Fault if ft and ft in fault_flags]
-                    print(f"  {name}: {active or 'none'}")
-                else:
-                    print(f"  {name}: {value}")
-            print()
-
-
-# -- Fountain commands ---------------------------------------------------------
-
-
-async def cmd_fountain_status(device_type: str) -> None:
-    async with _connect(device_type) as dev:
-        dev = cast(Fountain, dev)
-        state = await dev.get_state()
-        print("=== PetSnowy Water Fountain Status ===")
-        print()
-        print(f"  Power:              {'ON' if state.switch else 'OFF'}")
-        print(f"  Work mode:          {state.work_mode.value}")
-        print(f"  Filter remaining:   {state.filter_days} days")
-        print(f"  Pump clean in:      {state.pump_time} days")
-        print(f"  Filter reminder:    {state.filter_life} days")
-
-
-# -- Purifier commands ---------------------------------------------------------
-
-
-async def cmd_purifier_status(device_type: str) -> None:
-    async with _connect(device_type) as dev:
-        dev = cast(Purifier, dev)
-        state = await dev.get_state()
-        print("=== PetSnowy Air Purifier Status ===")
-        print()
-        print(f"  Power:              {'ON' if state.switch else 'OFF'}")
-        print(f"  Mode:               {state.mode.value}")
-        print(f"  Fan speed:          {state.speed}")
-        print(f"  Ionizer:            {'ON' if state.anion else 'OFF'}")
-        print(f"  TVOC:               {state.tvoc} ug/m3")
-        print(f"  Filter remaining:   {state.filter_days} days")
-        print(f"  Countdown:          {state.countdown_set}")
-        print(f"  Countdown left:     {state.countdown_left} min")
-
-        if state.faults:
-            print("\n  FAULTS:")
-            for flag in PurifierFault:
-                if flag and flag in state.faults:
-                    print(f"    - {flag.name}")
-        else:
-            print("\n  Faults:             None")
-
-
-# -- Feeder commands -----------------------------------------------------------
-
-
-async def cmd_feeder_status(device_type: str) -> None:
-    async with _connect(device_type) as dev:
-        dev = cast(Feeder, dev)
-        state = await dev.get_state()
-        print("=== PetSnowy Pet Feeder Status ===")
-        print()
-        print(f"  Food level:         {state.food_status.value}")
-
-
-# -- Command dispatch ----------------------------------------------------------
-
-
-async def _cmd_power(device_type: str, name: str, method: str) -> None:
-    """Power on/off helper for devices with turn_on/turn_off (no args)."""
-    async with _connect(device_type) as dev:
-        await getattr(dev, method)()
-        print(f"{name}.")
-
-
-def _build_litterbox_commands() -> dict[str, Any]:
-    return {
-        "status": lambda args, dt: cmd_litterbox_status(dt),
-        "clean": lambda args, dt: cmd_button(dt, "Clean cycle", "clean"),
-        "deodorize": lambda args, dt: cmd_button(dt, "Deodorization", "deodorize"),
-        "pause": lambda args, dt: cmd_button(dt, "Pause", "pause"),
-        "resume": lambda args, dt: cmd_button(dt, "Resume", "resume"),
-        "empty": lambda args, dt: cmd_button(dt, "Empty litter", "empty_litter"),
-        "cancel-empty": lambda args, dt: cmd_button(dt, "Cancel empty", "cancel_empty"),
-        "reset-filter": lambda args, dt: cmd_button(dt, "Filter reset", "reset_filter"),
-        "calibrate-weight": lambda args, dt: cmd_button(
-            dt, "Weight calibration", "calibrate_weight"
-        ),
-        "light": lambda args, dt: cmd_setting(
-            dt, "Light", "set_light", _parse_bool(args[0])
-        ),
-        "auto-clean": lambda args, dt: cmd_setting(
-            dt, "Auto-clean", "set_auto_clean", _parse_bool(args[0])
-        ),
-        "clean-delay": lambda args, dt: cmd_setting(
-            dt, "Clean delay", "set_clean_delay", int(args[0])
-        ),
-        "sleep": lambda args, dt: cmd_setting(
-            dt, "Sleep mode", "set_sleep_mode", _parse_bool(args[0])
-        ),
-        "child-lock": lambda args, dt: cmd_setting(
-            dt, "Child lock", "set_child_lock", _parse_bool(args[0])
-        ),
-        "auto-deodorize": lambda args, dt: cmd_setting(
-            dt, "Auto-deodorize", "set_auto_deodorize", _parse_bool(args[0])
-        ),
-        "scheduled-deodorize": lambda args, dt: cmd_setting(
-            dt, "Scheduled deodorize", "set_scheduled_deodorize", _parse_bool(args[0])
-        ),
-        "scheduled-clean": lambda args, dt: cmd_setting(
-            dt, "Scheduled clean", "set_scheduled_clean", _parse_bool(args[0])
-        ),
-        "monitor": lambda args, dt: cmd_monitor(dt),
-    }
-
-
-def _build_fountain_commands() -> dict[str, Any]:
-    return {
-        "status": lambda args, dt: cmd_fountain_status(dt),
-        "on": lambda args, dt: _cmd_power(dt, "Powered on", "turn_on"),
-        "off": lambda args, dt: _cmd_power(dt, "Powered off", "turn_off"),
-        "set-work-mode": lambda args, dt: cmd_setting(
-            dt, "Work mode", "set_work_mode", args[0]
-        ),
-        "reset-filter": lambda args, dt: cmd_button(dt, "Filter reset", "reset_filter"),
-        "reset-pump": lambda args, dt: cmd_button(dt, "Pump reset", "reset_pump"),
-        "set-filter-reminder": lambda args, dt: cmd_setting(
-            dt, "Filter reminder", "set_filter_reminder", int(args[0])
-        ),
-        "monitor": lambda args, dt: cmd_monitor(dt),
-    }
-
-
-def _build_purifier_commands() -> dict[str, Any]:
-    return {
-        "status": lambda args, dt: cmd_purifier_status(dt),
-        "on": lambda args, dt: _cmd_power(dt, "Powered on", "turn_on"),
-        "off": lambda args, dt: _cmd_power(dt, "Powered off", "turn_off"),
-        "set-mode": lambda args, dt: cmd_setting(dt, "Mode", "set_mode", args[0]),
-        "set-speed": lambda args, dt: cmd_setting(
-            dt, "Fan speed", "set_speed", args[0]
-        ),
-        "anion": lambda args, dt: cmd_setting(
-            dt, "Ionizer", "set_anion", _parse_bool(args[0])
-        ),
-        "set-countdown": lambda args, dt: cmd_setting(
-            dt, "Countdown", "set_countdown", args[0]
-        ),
-        "monitor": lambda args, dt: cmd_monitor(dt),
-    }
-
-
-def _build_feeder_commands() -> dict[str, Any]:
-    return {
-        "status": lambda args, dt: cmd_feeder_status(dt),
-        "feed": lambda args, dt: cmd_setting(dt, "Feed", "feed", int(args[0])),
-        "quick-feed": lambda args, dt: cmd_button(dt, "Quick feed", "quick_feed"),
-        "monitor": lambda args, dt: cmd_monitor(dt),
-    }
-
-
-DEVICE_COMMANDS: dict[str, dict[str, Any]] = {
-    "litterbox": _build_litterbox_commands(),
-    "fountain": _build_fountain_commands(),
-    "purifier": _build_purifier_commands(),
-    "feeder": _build_feeder_commands(),
+DEVICE_COMMANDS: dict[str, dict[str, Command]] = {
+    "litterbox": LITTERBOX_COMMANDS,
+    "fountain": FOUNTAIN_COMMANDS,
+    "purifier": PURIFIER_COMMANDS,
+    "feeder": FEEDER_COMMANDS,
 }
 
 
-# -- Help text -----------------------------------------------------------------
-
-HELP_TEXTS: dict[str, str] = {
-    "litterbox": """\
-Litterbox commands:
-  status                  Show device state
-  clean                   Start manual clean cycle
-  deodorize               Start deodorization
-  pause                   Pause current operation
-  resume                  Resume paused operation
-  empty                   Start emptying litter
-  cancel-empty            Cancel litter emptying
-  reset-filter            Reset filter life counter
-  calibrate-weight        Calibrate weight sensor
-  light on|off            Toggle indicator light
-  auto-clean on|off       Toggle automatic cleaning
-  clean-delay <minutes>   Set auto-clean delay (2-60, even)
-  sleep on|off            Toggle sleep mode
-  child-lock on|off       Toggle child/pet lock
-  auto-deodorize on|off   Toggle auto deodorization
-  scheduled-deodorize on|off  Toggle scheduled deodorization
-  scheduled-clean on|off  Toggle scheduled cleaning
-  monitor                 Stream live events""",
-    "fountain": """\
-Fountain commands:
-  status                        Show fountain state
-  on / off                      Power on/off
-  set-work-mode normal|night    Set operating mode
-  reset-filter                  Reset filter counter
-  reset-pump                    Reset pump counter
-  set-filter-reminder <days>    Set filter reminder (0-90)
-  monitor                       Stream live events""",
-    "purifier": """\
-Purifier commands:
-  status                                Show purifier state
-  on / off                              Power on/off
-  set-mode auto|sleep                   Set operating mode
-  set-speed 1-6                         Set fan speed
-  anion on|off                          Toggle ionizer
-  set-countdown cancel|1h|2h|3h|4h|5h   Set auto-off timer
-  monitor                               Stream live events""",
-    "feeder": """\
-Feeder commands:
-  status              Show feeder state
-  feed <portions>     Dispense food (1-20 cups)
-  quick-feed          Dispense 1 portion
-  monitor             Stream live events""",
-}
+# -- Help -------------------------------------------------------------------------
 
 
-def _print_help(device_type: str | None = None) -> None:
-    print("Usage: python -m petsnowy [--device <type>] <command> [args]")
-    print()
-    print("Device types: litterbox (default), fountain, purifier, feeder")
-    print()
-    if device_type and device_type in HELP_TEXTS:
-        print(HELP_TEXTS[device_type])
-    else:
-        for _dt, text in HELP_TEXTS.items():
-            print(text)
-            print()
+def format_device_help(device_type: str) -> str:
+    rows = [
+        (f"{name} {cmd.metavar}".rstrip(), cmd.summary)
+        for name, cmd in DEVICE_COMMANDS[device_type].items()
+    ]
+    width = max(len(usage) for usage, _ in rows) + 2
+    lines = [f"{device_type.capitalize()} commands:"]
+    lines.extend(f"  {usage:<{width}}{summary}" for usage, summary in rows)
+    return "\n".join(lines)
 
 
-def main() -> None:
-    argv = sys.argv[1:]
+def format_help(device_type: str | None = None) -> str:
+    """Return CLI help for one device type, or for every type when None."""
+    header = [
+        "Usage: petsnowy [--device <type>] <command> [args]",
+        "",
+        f"Device types: {', '.join(DEVICE_COMMANDS)} (default: {DEFAULT_DEVICE})",
+        "",
+    ]
+    types = [device_type] if device_type else list(DEVICE_COMMANDS)
+    return "\n".join(header) + "\n" + "\n\n".join(map(format_device_help, types))
 
-    # Parse --device flag
-    device_type = "litterbox"
-    if len(argv) >= 2 and argv[0] == "--device":
-        device_type = argv[1].lower()
-        argv = argv[2:]
+
+# -- Parse, run, report -----------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Invocation:
+    """A parsed command line.
+
+    ``command`` is None when help was requested.
+    """
+
+    device_type: str
+    explicit_device: bool
+    command: str | None
+    value: object = None
+
+
+def parse_args(argv: Sequence[str]) -> Invocation:
+    """Parse ``[--device TYPE] COMMAND [ARG]`` into an Invocation.
+
+    Raises:
+        UsageError: Unknown device or command, or a missing or invalid argument.
+    """
+    args = list(argv)
+    device_type, explicit = DEFAULT_DEVICE, False
+    if args and (args[0] == "--device" or args[0].startswith("--device=")):
+        flag = args.pop(0)
+        if "=" in flag:
+            device_type = flag.split("=", 1)[1]
+        elif args:
+            device_type = args.pop(0)
+        else:
+            raise UsageError("--device needs a value")
+        device_type, explicit = device_type.lower(), True
         if device_type not in DEVICE_COMMANDS:
-            print(f"Unknown device type: {device_type}", file=sys.stderr)
-            print(f"Valid types: {', '.join(DEVICE_COMMANDS)}", file=sys.stderr)
-            sys.exit(1)
+            raise UsageError(
+                f"Unknown device type: {device_type}. "
+                f"Valid types: {', '.join(DEVICE_COMMANDS)}"
+            )
 
-    if not argv or argv[0] in ("-h", "--help", "help"):
-        _print_help(device_type)
-        return
+    if not args or args[0] in ("-h", "--help", "help"):
+        return Invocation(device_type, explicit, None)
 
-    cmd = argv[0]
-    args = argv[1:]
-    commands = DEVICE_COMMANDS[device_type]
-
-    if cmd not in commands:
-        print(f"Unknown {device_type} command: {cmd}", file=sys.stderr)
-        print(
-            f"Run 'python -m petsnowy --device {device_type} help' for usage",
-            file=sys.stderr,
+    name, rest = args[0], args[1:]
+    command = DEVICE_COMMANDS[device_type].get(name)
+    if command is None:
+        raise UsageError(
+            f"Unknown {device_type} command: {name}. "
+            f"Run 'petsnowy --device {device_type} help' for usage"
         )
-        sys.exit(1)
+    if len(rest) != command.nargs:
+        usage = f"{name} {command.metavar}".rstrip()
+        raise UsageError(f"Usage: petsnowy --device {device_type} {usage}")
+    value = command.parse(rest[0]) if command.parse is not None else None
+    return Invocation(device_type, explicit, name, value)
+
+
+async def run(invocation: Invocation) -> None:
+    """Connect to the device and execute a parsed (non-help) invocation."""
+    if invocation.command is None:
+        raise UsageError("no command given")
+    command = DEVICE_COMMANDS[invocation.device_type][invocation.command]
+    creds = resolve_credentials(invocation.device_type)
+    async with create_device(invocation.device_type, creds) as dev:
+        if command.action is not None:
+            await command.action(dev, invocation.device_type)
+            return
+        method = getattr(dev, str(command.method))
+        if command.parse is None:
+            await method()
+            print(command.done)
+        else:
+            try:
+                await method(invocation.value)
+            except ValueError as exc:  # the device method's own range check
+                raise UsageError(str(exc)) from exc
+            print(f"{command.done} set to {invocation.value}.")
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """Run the CLI and return the process exit code."""
+    try:
+        invocation = parse_args(sys.argv[1:] if argv is None else argv)
+    except UsageError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return EXIT_USAGE
+
+    if invocation.command is None:
+        print(
+            format_help(invocation.device_type if invocation.explicit_device else None)
+        )
+        return EXIT_OK
 
     try:
-        asyncio.run(commands[cmd](args, device_type))
+        asyncio.run(run(invocation))
     except KeyboardInterrupt:
         print("\nStopped.")
-    except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
+    except UsageError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return EXIT_USAGE
+    except PetSnowyError as exc:  # includes ConfigError for malformed credentials
+        print(f"Error: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    except Exception as exc:  # last-resort boundary: report, never traceback
+        print(f"Error: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+    return EXIT_OK
